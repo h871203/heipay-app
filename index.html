@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HEI 원비 관리</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+  // 명단·차수·출석 파일을 고치면 바로 반영되도록 항상 새로 읽습니다
+  ['seed-data.js', 'roster.js', 'cycles.js', 'attendance-data.js'].forEach(f => document.write(`<script src="${f}?t=${Date.now()}"><\/script>`));
+</script>
+<style>
+:root{
+  --bg:#f6f5f2; --card:#fff; --ink:#1f2328; --muted:#6b7078; --line:#e4e1da;
+  --accent:#2f5d50; --accent-soft:#e3eee9; --warn:#b4541f; --warn-soft:#fbeadf;
+  --ok:#2f7a4a; --ok-soft:#e2f2e7; --chip:#efece5;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#16181b; --card:#1f2226; --ink:#e8e6e1; --muted:#9aa0a6; --line:#33373c;
+    --accent:#7fbfa9; --accent-soft:#233a33; --warn:#e8945f; --warn-soft:#3d2a1e;
+    --ok:#7ccf98; --ok-soft:#1f3527; --chip:#2a2e33;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans KR",system-ui,sans-serif;font-size:15px;line-height:1.5}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+.top{max-width:1100px;margin:0 auto;padding:14px 16px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.top h1{font-size:18px;margin:0;font-weight:700}
+.top .month{margin-left:auto;display:flex;align-items:center;gap:6px}
+nav{max-width:1100px;margin:0 auto;padding:8px 16px 0;display:flex;gap:4px;overflow-x:auto}
+nav button{border:0;background:none;padding:8px 12px;font:inherit;color:var(--muted);border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap}
+nav button.on{color:var(--ink);border-color:var(--accent);font-weight:700}
+main{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+.card h2{font-size:16px;margin:0 0 10px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat .l{font-size:12px;color:var(--muted)}
+.stat .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat .s{font-size:12px;color:var(--muted)}
+.banner{border-radius:10px;padding:12px 14px;margin-bottom:14px;background:var(--accent-soft);color:var(--ink);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.banner.warn{background:var(--warn-soft)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-size:12px;color:var(--muted);font-weight:500}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.no{background:var(--warn-soft);color:var(--warn)}
+.pill.mut{background:var(--chip);color:var(--muted)}
+button,.btn{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:7px;cursor:pointer;text-decoration:none;display:inline-block}
+button.pri,.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) button.pri{color:#10201b}}
+button.sm{padding:3px 8px;font-size:12px}
+input,select,textarea{font:inherit;font-size:14px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:6px 8px;max-width:100%}
+textarea{width:100%;min-height:200px;line-height:1.6}
+input.w-num{width:110px;text-align:right}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.chips button{background:var(--chip);border:0;font-size:12px;padding:3px 9px}
+.msgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.msg{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card);display:flex;flex-direction:column;gap:8px}
+.msg.sent{opacity:.6}
+.msg pre{white-space:pre-wrap;font:inherit;font-size:13.5px;margin:0;background:var(--bg);border-radius:7px;padding:10px}
+.muted{color:var(--muted);font-size:13px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:760px){.grid2{grid-template-columns:1fr}}
+.bar{height:8px;border-radius:4px;background:var(--accent)}
+.bar.ex{background:var(--warn)}
+.hidden{display:none}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:99px;font-size:14px;opacity:0;transition:.2s;pointer-events:none}
+.toast.on{opacity:1}
+label.inl{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:3px}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>HEI English 원비 관리</h1>
+    <div class="month">
+      <button class="sm" onclick="shiftMonth(-1)">◀</button>
+      <strong id="monthLabel"></strong>
+      <button class="sm" onclick="shiftMonth(1)">▶</button>
+    </div>
+  </div>
+  <nav id="tabs">
+    <button data-t="cycle" class="on">차수별 원비</button>
+    <button data-t="dash">월별 원비</button>
+    <button data-t="msg">문자 만들기</button>
+    <button data-t="money">돈관리</button>
+    <button data-t="pay">결제내역</button>
+    <button data-t="stu">학생·원비 설정</button>
+    <button data-t="set">설정·백업</button>
+  </nav>
+</header>
+<main id="view"></main>
+<input type="file" id="xlsxFile" accept=".xlsx,.xls" class="hidden">
+<input type="file" id="jsonFile" accept=".json" class="hidden">
+<input type="file" id="attFile" accept=".xlsx,.xls" multiple class="hidden">
+<div class="toast" id="toast"></div>
+
+<script>
+const KEY = 'hei-monthly-payment-v1';
+const won = n => (n == null || isNaN(n)) ? '-' : Math.round(n).toLocaleString('ko-KR') + '원';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uid = () => Math.random().toString(36).slice(2, 10);
+const ym = (y, m) => `${y}-${String(m).padStart(2, '0')}`;
+const addMonth = (k, d) => { let [y, m] = k.split('-').map(Number); m += d; while (m > 12) { m -= 12; y++; } while (m < 1) { m += 12; y--; } return ym(y, m); };
+const mNum = k => Number(k.split('-')[1]);
+const DOW = ['일','월','화','수','목','금','토'];
+
+// 모든 멘트 첫머리 고정: [HEI English] {반}반 / 안녕하세요, 학부모님 / {월}월 원비 안내드립니다.
+const TEMPLATE_VERSION = 2;
+const DEFAULT_TEMPLATES = [
+  { id: 't6', name: '차수 원비 안내', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비 안내드립니다.
+
+▪ 수업 기간: {수업기간}
+▪ 휴강일: {휴강일}
+▪ 원비: {금액}
+▪ 결제 마감: {마감일}
+
+{결제방법}
+
+항상 믿고 보내주셔서 감사합니다.
+{서명}` },
+  { id: 't1', name: '원비 안내 (월별)', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비 안내드립니다.
+
+▪ 원비: {금액}
+▪ 결제 기간: {결제기간}
+
+{결제방법}
+
+이번 달도 믿고 보내주셔서 감사합니다.
+{서명}` },
+  { id: 't2', name: '마감 리마인드', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비 결제 마감일({마감일}) 안내드립니다.
+
+▪ 원비: {금액}
+{결제방법}
+
+이미 결제하셨다면 이 문자는 넘기셔도 됩니다. 감사합니다!
+{서명}` },
+  { id: 't3', name: '미납 안내', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비({금액})가 아직 확인되지 않아 다시 한번 안내드립니다.
+{결제방법}
+
+혹시 결제에 어려움이 있으시면 편하게 말씀해 주세요.
+{서명}` },
+  { id: 't5', name: '회차제 수업료 안내', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비 안내드립니다.
+
+▪ 수업 횟수: {횟수}회 ({수업요일})
+▪ 수업료: {회당금액} × {횟수}회{캐피타운} = {금액}
+▪ 현재 남은 횟수: {잔여횟수}회
+▪ 결제 기간: {결제기간}
+
+{결제방법}
+{서명}` },
+  { id: 't7', name: '차수 회차제 안내', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비 안내드립니다.
+
+▪ 수업 기간: {수업기간}
+▪ 휴강일: {휴강일}
+▪ 수업 횟수: {횟수}회 ({수업요일})
+▪ 수업료: {회당금액} × {횟수}회{캐피타운} = {금액}
+▪ 현재 남은 횟수: {잔여횟수}회
+▪ 결제 마감: {마감일}
+
+{결제방법}
+{서명}` },
+  { id: 't8', name: 'Daily 출석 정산 안내', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비 안내드립니다.
+
+▪ 수업 기간: {정산기간}
+▪ 출석: {횟수}회
+  ({출석일})
+▪ 수업료: {회당금액} × {횟수}회{캐피타운} = {금액}
+▪ 결제 마감: {마감일}
+
+{결제방법}
+{서명}` },
+  { id: 't9', name: '차수 원비 안내 (반별)', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비 안내드립니다.
+
+▪ 수업 기간: {수업기간}
+▪ 휴강일: {휴강일}
+▪ 원비: {금액}
+▪ 결제 마감: {마감일}
+
+{결제방법}
+
+항상 믿고 보내주셔서 감사합니다.
+{서명}` },
+  { id: 't10', name: '원비 안내 (월별·반별)', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비 안내드립니다.
+
+▪ 원비: {금액}
+▪ 결제 기간: {결제기간}
+
+{결제방법}
+
+이번 달도 믿고 보내주셔서 감사합니다.
+{서명}` },
+  { id: 't4', name: '결제 확인 감사', body:
+`[{학원}] {반}반
+안녕하세요, 학부모님
+{월}월 원비 결제 확인되었습니다.
+이번 달도 즐겁게 공부할 수 있도록 잘 이끌겠습니다. 감사합니다 😊
+{서명}` },
+];
+
+const DEFAULT_SETTINGS = {
+  academy: 'HEI English',
+  sign: 'HEI English 드림',
+  payGuide: '보내드린 결제 링크 또는 현장 결제로 납부 부탁드립니다.',
+  sendFrom: 20, sendTo: 25,
+  cutoffDay: 20,
+  payItem: '{월}월 원비 ({기간})',
+  payItemDaily: '{월}월 Daily 원비 ({기간})',
+};
+
+const EXTRA_RE = /교재|헤드셋|특강|식대|점심|도서/;
+const TUITION_RE = /원비|주\s*\d|수업|매일|cappytown|\d회|club/i;
+const isExtra = item => EXTRA_RE.test(item) && !TUITION_RE.test(item);
+
+let db, state;
+
+function blank() {
+  return { settings: { ...DEFAULT_SETTINGS }, payments: [], students: {}, aliases: {}, attendance: {}, extras: {}, cycles: [],
+    templates: DEFAULT_TEMPLATES.map(t => ({ ...t })), expenses: [], recurring: [
+      { id: uid(), cat: '임대료', desc: '월세', amount: 0 },
+      { id: uid(), cat: '관리비·공과금', desc: '관리비/전기/인터넷', amount: 0 },
+      { id: uid(), cat: '프로그램', desc: 'CappyTown 이용료', amount: 0 },
+    ], sent: {}, manualPaid: {} };
+}
+function load() {
+  let d = null;
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.payments) d = { ...blank(), ...s, settings: { ...DEFAULT_SETTINGS, ...s.settings } }; } catch (e) {}
+  if (!d) { d = blank(); if (window.HEI_SEED) importRows(d, HEI_SEED.header, HEI_SEED.rows); }
+  if ((d.tplVersion || 0) < TEMPLATE_VERSION) {
+    DEFAULT_TEMPLATES.forEach(t => { const i = d.templates.findIndex(x => x.id === t.id); if (i >= 0) d.templates[i] = { ...t }; });
+    d.settings.payItem = DEFAULT_SETTINGS.payItem; d.settings.payItemDaily = DEFAULT_SETTINGS.payItemDaily;
+    d.tplVersion = TEMPLATE_VERSION;
+  }
+  DEFAULT_TEMPLATES.forEach(t => { if (!d.templates.some(x => x.id === t.id)) d.templates.push({ ...t }); });
+  d.templates.forEach(t => { t.body = t.body.replace('{횟수}회 = {금액}', '{횟수}회{캐피타운} = {금액}'); });
+  const t8 = d.templates.find(t => t.id === 't8'); if (t8?.body.includes('{정산차수}')) t8.body = DEFAULT_TEMPLATES.find(t => t.id === 't8').body;
+  applyRoster(d);
+  const C = window.HEI_CYCLES;
+  if (C && (d.cyclesVersion || 0) < C.VERSION) { d.cycles = C.list.map(c => ({ ...c, payDue: c.start })); d.cyclesVersion = C.VERSION; }
+  d.cycles ||= [];
+  d.attendance ||= {};
+  if (window.HEI_ATTENDANCE && !d.attSeeded) { mergeAttendance(d, HEI_ATTENDANCE); d.attSeeded = true; }
+  return d;
+}
+function mergeAttendance(d, att) {
+  let n = 0;
+  for (const [raw, days] of Object.entries(att)) {
+    const t = d.attendance[canon(d, raw)] ||= {};
+    for (const [iso, v] of Object.entries(days)) { if (t[iso] !== v) n++; t[iso] = v; }
+  }
+  return n;
+}
+const attended = (name, from, to) => Object.entries(db.attendance[name] || {}).filter(([d, v]) => v === 'V' && d >= from && d <= to).map(([d]) => d).sort();
+
+/* ---------- 12회 묶음(차수) ---------- */
+const pad = n => String(n).padStart(2, '0');
+const isoOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const dOf = iso => new Date(iso + 'T00:00:00');
+const addDays = (iso, n) => { const d = dOf(iso); d.setDate(d.getDate() + n); return isoOf(d); };
+const fmtD = iso => { const d = dOf(iso); return `${d.getMonth() + 1}/${d.getDate()}(${DOW[d.getDay()]})`; };
+const todayISO = () => isoOf(new Date());
+const cyclesSorted = () => [...db.cycles].sort((a, b) => a.start.localeCompare(b.start));
+function cycleSessions(s, c) {
+  let n = 0; for (let d = c.start; d <= c.end; d = addDays(d, 1)) if ((s.days || []).includes(DOW[dOf(d).getDay()]) && !c.off.includes(d)) n++;
+  return n;
+}
+// 결제일이 [차수 시작 2주 전, 다음 차수 시작 2주 전) 안이면 그 차수 원비로 봅니다
+function cycleOfDate(iso) {
+  const L = cyclesSorted();
+  for (let i = 0; i < L.length; i++) {
+    const lo = addDays(L[i].start, -14), hi = L[i + 1] ? addDays(L[i + 1].start, -14) : addDays(L[i].end, 1);
+    if (iso >= lo && iso < hi) return L[i];
+  }
+  return null;
+}
+const defaultCycle = () => { const t = todayISO(), L = cyclesSorted(); return (L.find(c => c.start > t) || L[L.length - 1] || {}).no; };
+
+// 기간(P): 월 또는 차수
+const monthP = m => ({ key: m, isCycle: false, month: m, label: `${mNum(m)}월` });
+const cycleP = no => { const c = db.cycles.find(x => x.no === no); return { key: 'c' + no, isCycle: true, cycle: c, month: c.start.slice(0, 7), label: `${no}차` }; };
+// Daily(출석 정산): 정산 시작일부터 출석을 15회씩 끊어서, 15회가 찰 때마다 한 번 청구
+//  (15회 × 1회 금액 + 캐피타운). 남는 출석은 다음 묶음으로 넘어갑니다.
+const DAILY_START = '2026-09-11';
+function dailyInfo(s) {
+  const size = s.blockSize || 15, all = attended(s.name, s.attStart || DAILY_START, '9999-12-31'), blocks = [];
+  for (let i = 0; i + size <= all.length; i += size) blocks.push(all.slice(i, i + size));
+  const done = Math.min(s.dailyPaid || 0, blocks.length);
+  return { size, blocks, done, pending: blocks.slice(done), current: all.slice(blocks.length * size) };
+}
+const attendedP = s => dailyInfo(s).pending.flat();
+const countP = (s, P) => s.billing === 'attend' ? attendedP(s).length : P.isCycle ? (s.fixedCount || cycleSessions(s, P.cycle)) : sessionsFor(s, P.month);
+const extraP = s => (s.extra || 0) * (s.billing === 'attend' ? dailyInfo(s).pending.length : 1);
+// 정액 + 추가 수업(예: 화요일 1시간 추가 1회 25,000원) — 그 기간 안의 해당 요일 수만큼
+const addonCount = (s, P) => !s.addon ? 0 : P.isCycle ? cycleSessions({ days: s.addon.days }, P.cycle) : countDays(P.month, s.addon.days);
+const addonFee = (s, P) => s.addon ? s.addon.unit * addonCount(s, P) : 0;
+const baseFeeP = (s, P) => ['session', 'attend'].includes(s.billing) ? (s.unit || 25000) * countP(s, P) + extraP(s) : (s.fee || 0) + addonFee(s, P);
+// 아이별 추가 수업: 차수(또는 월)마다 따로 넣는 금액
+const extrasOf = (name, P) => db.extras?.[P.key]?.[name] || [];
+const extrasSum = (name, P) => extrasOf(name, P).reduce((a, x) => a + x.n * x.unit, 0);
+const feeP = (s, P) => baseFeeP(s, P) + extrasSum(s.name, P);
+// Daily 학생은 15회가 채워져 청구할 묶음이 있을 때만 이번 청구 대상
+const billable = s => s.billing !== 'attend' || dailyInfo(s).pending.length > 0;
+function paidP(name, P) {
+  if (!P.isCycle) return paidInfo(name, P.month);
+  const man = db.manualPaid[P.key]?.[name];
+  if (man) return { paid: true, amount: man.amount, method: man.method || '수동', date: man.date || '', manual: true };
+  const ps = db.payments.filter(p => !p.canceled && !isExtra(p.item) && canon(db, p.student) === name && cycleOfDate(p.date)?.no === P.cycle.no);
+  if (!ps.length) return { paid: false };
+  const s = db.students[name];
+  return { paid: true, amount: ps.reduce((a, p) => a + (p.amount ?? (s ? feeP(s, P) : 0)), 0), method: ps.map(p => p.method).join(', '),
+    date: ps.map(p => p.date.slice(5).replace('-', '/')).join(', '), estimated: ps.some(p => p.amount == null) };
+}
+
+/* ---------- 반 명단 반영 ---------- */
+function applyRoster(d) {
+  const R = window.HEI_ROSTER; if (!R || (d.rosterVersion || 0) >= R.VERSION) return;
+  Object.assign(d.aliases, R.aliases);
+  for (const [from, to] of Object.entries(d.aliases)) {
+    const old = d.students[from]; if (!old || from === to) continue;
+    delete d.students[from];
+    if (d.students[to] && old.phone && !d.students[to].phone) d.students[to].phone = old.phone;
+  }
+  rebuildStudents(d);
+  Object.values(d.students).forEach(s => { s.active = false; s.activeEdited = true; s.order = 999; });
+  R.students.forEach((r, i) => {
+    const s = d.students[r.name] ||= { name: r.name, phone: '', parent: '', memo: '', item: '월 수업료', fee: 0 };
+    const label = R.groups[r.group] || '';
+    s.group = r.group; s.time = r.time; s.days = [...r.days];
+    s.cls = !r.time ? label : (!label || /^[월화수목금토일]/.test(r.time)) ? r.time : `${label} ${r.time}`;
+    s.clsEdited = true; s.active = true; s.activeEdited = true; s.order = i;
+    s.billing = r.billing || 'monthly'; s.unit = r.unit || 25000; s.extra = r.extra || 0; s.fixedCount = r.fixedCount || 0;
+    if (r.fee) { s.fee = r.fee; s.feeEdited = true; s.feeCheck = false; }
+    if (r.phone) s.phone = r.phone;
+    s.enrolled = r.enrolled || s.enrolled || ''; if (r.memo) s.memo = r.memo;
+    s.addon = r.addon ? { ...r.addon, days: [...r.addon.days] } : null;
+    s.ledger ||= [];
+  });
+  if (R.recurring && d.recurring.every(x => !Number(x.amount))) d.recurring = R.recurring.map(x => ({ id: uid(), ...x }));
+  if (R.fixedFrom) d.settings.fixedFrom = R.fixedFrom;
+  d.rosterVersion = R.VERSION;
+}
+
+/* ---------- 원비 계산 (월정액 / 회차제) ---------- */
+function countDays(month, days) {
+  const [y, m] = month.split('-').map(Number); const last = new Date(y, m, 0).getDate(); let n = 0;
+  for (let i = 1; i <= last; i++) if (days.includes(DOW[new Date(y, m - 1, i).getDay()])) n++;
+  return n;
+}
+const sessionsFor = (s, month) => s.fixedCount || countDays(month, s.days || []);
+const feeFor = (s, month) => s.billing === 'attend' ? feeP(s, monthP(month)) : (s.billing === 'session' ? (s.unit || 25000) * sessionsFor(s, month) + (s.extra || 0) : (s.fee || 0) + addonFee(s, monthP(month))) + extrasSum(s.name, monthP(month));
+const remaining = s => (s.ledger || []).reduce((a, e) => a + (e.type === 'charge' ? e.n : -e.n), 0);
+const byOrder = (a, b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name);
+function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { toast('저장 실패: 브라우저 저장소를 쓸 수 없습니다'); } }
+
+function currentBillingMonth() {
+  const t = new Date(); const cut = (db?.settings?.cutoffDay) || 20;
+  const k = ym(t.getFullYear(), t.getMonth() + 1);
+  return t.getDate() >= cut ? addMonth(k, 1) : k;
+}
+
+/* ---------- 엑셀 가져오기 ---------- */
+function parseDate(s) { // "2026. 9. 7 01:33:10"
+  const m = String(s).match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})(?:\s+(\d{1,2}:\d{2}))?/);
+  return m ? { date: `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`, time: m[4] || '' } : null;
+}
+const toNum = v => { const n = Number(String(v ?? '').replace(/[^\d.-]/g, '')); return String(v ?? '').trim() === '' || isNaN(n) ? null : n; };
+function canon(d, name) { name = String(name).trim(); return d.aliases[name] || name; }
+
+function importRows(d, header, rows) {
+  const c = n => header.findIndex(h => String(h).trim() === n);
+  const I = { dt: c('거래일시'), cls: c('반명'), stu: c('학생명'), item: c('청구항목'), method: c('수납방법'),
+    tax: c('과세'), notax: c('비과세'), cdate: c('취소일자'), camt: c('취소금액') };
+  if (I.stu < 0 || I.dt < 0) throw new Error('통합결제내역 형식이 아닙니다 (학생명/거래일시 열 없음)');
+  const have = new Set(d.payments.map(p => p.key));
+  let added = 0;
+  for (const r of rows) {
+    const pd = parseDate(r[I.dt]); if (!pd || !r[I.stu]) continue;
+    const key = `${r[I.dt]}|${r[I.stu]}|${r[I.item]}`;
+    if (have.has(key)) continue;
+    const a = (toNum(r[I.tax]) || 0) + (toNum(r[I.notax]) || 0);
+    d.payments.push({ id: uid(), key, date: pd.date, time: pd.time, cls: String(r[I.cls] || ''), student: String(r[I.stu]).trim(),
+      item: String(r[I.item] || ''), method: String(r[I.method] || ''), amount: a > 0 ? a : null,
+      canceled: !!(I.cdate >= 0 && r[I.cdate]) || !!(I.camt >= 0 && toNum(r[I.camt])) });
+    have.add(key); added++;
+  }
+  d.payments.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  rebuildStudents(d);
+  return added;
+}
+
+// 청구항목에 "9월 원비", "8,9월" 처럼 월이 적혀 있으면 그 달로, 없으면 결제일 기준(기준일 이후면 다음 달)
+function monthsOf(p, d = db) {
+  const [y, m, day] = p.date.split('-').map(Number);
+  const nums = [...p.item.matchAll(/(\d{1,2})(?=\s*(?:,\s*\d{1,2}\s*)*월)/g)].map(x => Number(x[1])).filter(n => n >= 1 && n <= 12);
+  if (!nums.length) return [day >= (d.settings.cutoffDay || 20) ? addMonth(ym(y, m), 1) : ym(y, m)];
+  return [...new Set(nums)].map(n => ym(n - m > 6 ? y - 1 : m - n > 6 ? y + 1 : y, n)).sort();
+}
+const billMonthOf = (p, d = db) => monthsOf(p, d).slice(-1)[0];
+const isClean = item => !/추가|교재|원비\s*\+/.test(item);
+const perMonth = (p, d = db) => p.amount == null ? null : Math.round(p.amount / monthsOf(p, d).length);
+
+function rebuildStudents(d) {
+  // 청구항목별 대표 금액
+  const byItem = {};
+  d.payments.forEach(p => { if (p.amount && !isExtra(p.item) && isClean(p.item)) (byItem[p.item] ||= []).push(perMonth(p, d)); });
+  const mode = arr => { const c = {}; arr.forEach(v => c[v] = (c[v] || 0) + 1); return Object.entries(c).sort((a, b) => b[1] - a[1]); };
+  const itemPrice = {}; for (const k in byItem) itemPrice[k] = Number(mode(byItem[k])[0][0]);
+
+  const tuition = d.payments.filter(p => !isExtra(p.item) && !p.canceled);
+  const lastBill = tuition.length ? tuition.map(p => billMonthOf(p, d)).sort().pop() : null;
+  const group = {};
+  tuition.forEach(p => (group[canon(d, p.student)] ||= []).push(p));
+  for (const name in group) {
+    const ps = group[name], last = ps[ps.length - 1];
+    const s = d.students[name] ||= { name, phone: '', parent: '', memo: '', feeEdited: false, activeEdited: false };
+    if (!s.clsEdited) s.cls = last.cls;
+    if (!s.itemEdited) {
+      const plain = ps.filter(p => !/\d\s*월|원비|안내|추가|교재|\d회\s*\(\d회/.test(p.item)).pop();
+      s.item = plain ? plain.item : '월 수업료';
+    }
+    if (!s.feeEdited) {
+      const clean = ps.filter(p => p.amount && isClean(p.item)).slice(-4).map(p => perMonth(p, d));
+      const any = ps.filter(p => p.amount).slice(-4).map(p => perMonth(p, d));
+      const recent = clean.length ? clean : any;
+      let fee = 0;
+      if (recent.length) {
+        const m = mode(recent); const top = m.filter(x => x[1] === m[0][1]).map(x => Number(x[0]));
+        fee = top.find(v => v === itemPrice[s.item]) ?? recent.filter(v => top.includes(v)).pop();
+      } else fee = itemPrice[s.item] || 0;
+      s.fee = fee;
+      s.feeCheck = !fee || (recent.length > 0 && !clean.length); // 교재비 등이 섞인 결제로만 추정한 경우
+    }
+    if (!s.activeEdited) {
+      const lb = ps.map(p => billMonthOf(p, d)).sort().pop();
+      s.active = !!lastBill && lb >= addMonth(lastBill, -1);
+    }
+    s.lastBill = ps.map(p => billMonthOf(p, d)).sort().pop();
+  }
+}
+
+/* ---------- 계산 ---------- */
+function paidInfo(name, month) {
+  const man = db.manualPaid[month]?.[name];
+  if (man) return { paid: true, amount: man.amount, method: man.method || '수동', date: man.date || '', manual: true };
+  const ps = db.payments.filter(p => !p.canceled && !isExtra(p.item) && canon(db, p.student) === name && monthsOf(p).includes(month));
+  if (!ps.length) return { paid: false };
+  const amt = ps.reduce((a, p) => a + (perMonth(p) ?? (db.students[name] ? feeFor(db.students[name], month) : 0)), 0);
+  return { paid: true, amount: amt, method: ps.map(p => p.method).join(', '), date: ps.map(p => p.date.slice(5).replace('-', '/')).join(', '), estimated: ps.some(p => p.amount == null) };
+}
+// 고정 지출: 설정한 달부터 매달 한 번 자동으로 넣습니다 (그 달 금액은 돈관리 탭에서 고칠 수 있어요)
+function ensureFixed(month) {
+  const from = db.settings.fixedFrom; db.fixedApplied ||= {};
+  if (!from || month < from || db.fixedApplied[month]) return;
+  db.recurring.forEach(r => db.expenses.push({ id: uid(), month, cat: r.cat, desc: r.desc, amount: Number(r.amount) || 0, fixed: true }));
+  db.fixedApplied[month] = true; save();
+}
+function monthSummary(month) {
+  ensureFixed(month);
+  const studs = Object.values(db.students).filter(s => s.active && billable(s));
+  let expect = 0, paidSum = 0, paidCnt = 0, unpaid = [];
+  studs.forEach(s => { expect += feeFor(s, month); const pi = paidInfo(s.name, month); if (pi.paid) { paidCnt++; paidSum += pi.amount || 0; } else unpaid.push(s); });
+  // 돈관리: 실제 거래월 기준 수입
+  const inMonth = db.payments.filter(p => !p.canceled && p.date.slice(0, 7) === month);
+  let income = 0, noAmt = 0; const byMethod = {};
+  inMonth.forEach(p => { let a = p.amount; if (a == null) { const st = db.students[canon(db, p.student)]; a = isExtra(p.item) || !st ? 0 : feeFor(st, billMonthOf(p)); noAmt++; }
+    income += a; const mk = /현장/.test(p.method) ? p.method : '온라인 결제'; byMethod[mk] = (byMethod[mk] || 0) + a; });
+  Object.entries(db.manualPaid[month] || {}).forEach(([n, v]) => { income += v.amount || 0; byMethod['수동 기록'] = (byMethod['수동 기록'] || 0) + (v.amount || 0); });
+  const exps = db.expenses.filter(e => e.month === month);
+  const expense = exps.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+  return { studs, expect, paidSum, paidCnt, unpaid, income, noAmt, byMethod, exps, expense, inMonth };
+}
+
+/* ---------- 문자 ---------- */
+function periodText(month) {
+  const prev = addMonth(month, -1); const [y, m] = prev.split('-').map(Number);
+  const f = new Date(y, m - 1, db.settings.sendFrom), t = new Date(y, m - 1, db.settings.sendTo);
+  return { range: `${m}월 ${f.getDate()}일(${DOW[f.getDay()]}) ~ ${m}월 ${t.getDate()}일(${DOW[t.getDay()]})`, due: `${m}월 ${t.getDate()}일(${DOW[t.getDay()]})` };
+}
+const shortName = n => n.replace(/\(.*?\)/g, '').trim();
+// '원비 안내' 멘트를 고르면 회차제 학생에게는 회차제 멘트를 자동으로 씁니다
+const SESSION_TPL = { t1: 't5', t6: 't7' }, ATTEND_TPL = { t1: 't8', t6: 't8' }, CLASS_TPL = { t1: 't10', t6: 't9' };
+const tplFor = (tpl, s) => {
+  const map = s.billing === 'session' ? SESSION_TPL : s.billing === 'attend' ? ATTEND_TPL : {};
+  return map[tpl.id] ? (db.templates.find(t => t.id === map[tpl.id]) || tpl) : tpl;
+};
+function amountText(s, P) {
+  const parts = [], ex = extrasOf(s.name, P);
+  if (s.addon && s.billing === 'monthly') parts.push(won(s.fee), `${s.addon.label} ${addonCount(s, P)}회 × ${won(s.addon.unit)}`);
+  else if (ex.length) parts.push(won(baseFeeP(s, P)));
+  ex.forEach(x => parts.push(`${x.desc} ${x.n}회 × ${won(x.unit)}`));
+  return parts.length ? `${parts.join(' + ')} = ${won(feeP(s, P))}` : won(feeP(s, P));
+}
+function fillTemplate(body, s, P) {
+  if (typeof P === 'string') P = monthP(P);
+  const st = db.settings, c = P.cycle;
+  const p = c ? { range: `~ ${fmtD(c.payDue || c.start)}`, due: fmtD(c.payDue || c.start) } : periodText(P.month);
+  const map = { '학원': st.academy, '학생': shortName(s.name), '월': mNum(P.month), '금액': amountText(s, P), '반': s.cls || '', '항목': s.item || '',
+    '횟수': countP(s, P), '회당금액': won(s.unit || 25000), '캐피타운': s.extra ? ` + 캐피타운 ${won(extraP(s))}` : '', '잔여횟수': remaining(s), '수업요일': (s.days || []).join('·'),
+    '차수': c ? `${c.no}차` : `${mNum(P.month)}월`, '수업기간': c ? `${fmtD(c.start)} ~ ${fmtD(c.end)}` : `${mNum(P.month)}월`,
+    '휴강일': c ? (c.note || '없음') : '',
+    '정산기간': (a => a.length ? `${fmtD(a[0])} ~ ${fmtD(a[a.length - 1])}` : '-')(attendedP(s)),
+    '출석일': attendedP(s).map(d => d.slice(5).replace('-', '/').replace(/^0/, '').replace('/0', '/')).join(', ') || '-',
+    '결제기간': p.range, '마감일': p.due, '결제방법': st.payGuide, '서명': st.sign, '학부모': s.parent || `${shortName(s.name)} 학부모` };
+  return body.replace(/\{(.+?)\}/g, (m, k) => map[k] ?? m);
+}
+
+/* ---------- 렌더 ---------- */
+function render() {
+  document.getElementById('monthLabel').textContent = `${state.month.split('-')[0]}년 ${mNum(state.month)}월`;
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === state.tab));
+  const v = document.getElementById('view');
+  document.querySelector('.top .month').style.visibility = state.tab === 'cycle' ? 'hidden' : '';
+  const empty = !Object.keys(db.students).length && state.tab !== 'set' ? `<div class="banner warn"><strong>아직 학생 데이터가 없어요.</strong>
+    <span class="muted">원래 쓰던 컴퓨터의 '설정·백업'에서 받은 백업 파일을 불러오면 학생·원비·연락처가 그대로 들어옵니다.</span>
+    <button class="pri" onclick="document.getElementById('jsonFile').click()">백업 불러오기</button></div>` : '';
+  v.innerHTML = empty + ({ cycle: viewCycle, dash: viewDash, msg: viewMsg, money: viewMoney, pay: viewPay, stu: viewStu, set: viewSet })[state.tab]();
+}
+
+function sendBanner() {
+  const t = new Date(), d = t.getDate(), st = db.settings;
+  const next = addMonth(ym(t.getFullYear(), t.getMonth() + 1), 1);
+  if (d >= st.sendFrom && d <= st.sendTo)
+    return `<div class="banner"><strong>📩 오늘은 원비 문자 보내는 기간입니다 (${st.sendFrom}~${st.sendTo}일)</strong><span class="muted">${mNum(next)}월 원비 안내 문자가 준비되어 있어요.</span><button class="pri" onclick="state.month='${next}';state.tpl='${d >= st.sendTo ? 't2' : 't1'}';go('msg')">문자 만들기</button></div>`;
+  const left = st.sendFrom - d;
+  if (left > 0 && left <= 5) return `<div class="banner"><span>⏰ ${left}일 뒤(${st.sendFrom}일)부터 ${mNum(next)}월 원비 안내 문자를 보내는 기간이에요.</span></div>`;
+  return '';
+}
+
+function viewDash() {
+  const m = state.month, S = monthSummary(m);
+  const sent = db.sent[m] || {};
+  const rows = S.studs.sort(byOrder).map(s => {
+    const pi = paidInfo(s.name, m), ses = s.billing === 'session';
+    return `<tr>
+      <td><strong>${esc(s.name)}</strong><div class="muted">${esc(s.cls)}</div></td>
+      <td>${ses ? `<span class="pill mut">회차제</span> ${sessionsFor(s, m)}회 × ${won(s.unit)}` : esc(s.item)}</td>
+      <td class="num">${won(feeFor(s, m))}${!ses && (!s.fee || s.feeCheck) ? ' <span class="pill no">금액 확인</span>' : ''}</td>
+      <td>${pi.paid ? `<span class="pill ok">납부</span> <span class="muted">${esc(pi.date)} ${esc(pi.method)}${pi.estimated ? ' · 금액 추정' : ''}</span>` : `<span class="pill no">미납</span>`}</td>
+      <td>${sent[s.name] ? '<span class="pill ok">보냄</span>' : '<span class="pill mut">안 보냄</span>'}</td>
+      <td>${extraCell(s, monthP(m))}</td>
+      <td>${pi.manual ? `<button class="sm" onclick="unmanual('${esc(s.name)}')">수동 취소</button>` : pi.paid ? '' : `<button class="sm" onclick="manualPay('${esc(s.name)}')">납부 처리</button>`}</td>
+    </tr>`; }).join('');
+  return `${sendBanner()}
+  <div class="stats">
+    <div class="stat"><div class="l">${mNum(m)}월 청구 예정</div><div class="v">${won(S.expect)}</div><div class="s">재원생 ${S.studs.length}명</div></div>
+    <div class="stat"><div class="l">납부 완료</div><div class="v">${S.paidCnt}명</div><div class="s">${won(S.paidSum)}</div></div>
+    <div class="stat"><div class="l">미납</div><div class="v" style="color:var(--warn)">${S.unpaid.length}명</div><div class="s">${won(S.unpaid.reduce((a, s) => a + feeFor(s, m), 0))}</div></div>
+    <div class="stat"><div class="l">${mNum(m)}월 순수익 (돈관리)</div><div class="v">${won(S.income - S.expense)}</div><div class="s">수입 ${won(S.income)} · 지출 ${won(S.expense)}</div></div>
+  </div>
+  ${S.unpaid.length ? `<div class="banner warn"><span>미납: ${S.unpaid.map(s => esc(shortName(s.name))).join(', ')}</span><button onclick="state.filter='unpaid';state.tpl='t3';go('msg')">미납 문자 만들기</button></div>` : ''}
+  <div class="card"><h2>${mNum(m)}월 원비 납부 현황</h2>
+    <p class="muted">${db.settings.cutoffDay}일 이후 결제는 다음 달 원비로 계산합니다. 현장 결제는 금액이 엑셀에 없어 학생 원비로 추정합니다.</p>
+    <div class="tbl"><table><thead><tr><th>학생</th><th>수업</th><th class="num">원비</th><th>납부</th><th>문자</th><th>추가 수업</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">재원생이 없습니다. 학생·원비 설정에서 추가하세요.</td></tr>'}</tbody></table></div>
+  </div>
+  ${sessionCard()}`;
+}
+
+function viewCycle() {
+  if (!db.cycles.length) return `<div class="card"><p class="muted">차수 일정이 없습니다.</p><button onclick="addCycle()">+ 차수 추가</button></div>`;
+  if (!db.cycles.some(c => c.no === state.cycle)) state.cycle = defaultCycle();
+  const P = cycleP(state.cycle), c = P.cycle, L = cyclesSorted(), idx = L.findIndex(x => x.no === c.no);
+  const studs = Object.values(db.students).filter(s => s.active && billable(s)).sort(byOrder);
+  const sent = db.sent[P.key] || {};
+  let expect = 0, paidCnt = 0, paidSum = 0; const unpaid = [];
+  studs.forEach(s => { expect += feeP(s, P); const pi = paidP(s.name, P); if (pi.paid) { paidCnt++; paidSum += pi.amount || 0; } else unpaid.push(s); });
+  const sentCnt = studs.filter(s => sent[s.name]).length, t = todayISO();
+  const status = t < c.start ? `시작 ${Math.round((dOf(c.start) - dOf(t)) / 864e5)}일 전` : t <= c.end ? '진행 중' : '종료';
+  const rows = studs.map(s => { const pi = paidP(s.name, P), n = countP(s, P); return `<tr>
+      <td><strong>${esc(s.name)}</strong><div class="muted">${esc(s.cls)}</div></td>
+      <td class="num">${n}회${s.billing === 'session' ? ' <span class="pill mut">회차제</span>' : s.billing === 'attend' ? ` <span class="pill mut">Daily 15회</span>` : ''}</td>
+      <td class="num">${won(feeP(s, P))}${s.billing !== 'session' && (!s.fee || s.feeCheck) ? ' <span class="pill no">확인</span>' : ''}</td>
+      <td>${pi.paid ? `<span class="pill ok">납부</span> <span class="muted">${esc(pi.date)}</span>` : '<span class="pill no">미납</span>'}</td>
+      <td>${sent[s.name] ? '<span class="pill ok">보냄</span>' : '<span class="pill mut">안 보냄</span>'}</td>
+      <td>${extraCell(s, P)}</td>
+      <td>${pi.manual ? `<button class="sm" onclick="unmanual('${esc(s.name)}','${P.key}')">수동 취소</button>` : pi.paid ? '' : `<button class="sm" onclick="manualPay('${esc(s.name)}','${P.key}')">납부 처리</button>`}</td></tr>`; }).join('');
+  return `
+  <div class="card">
+    <div class="row">
+      <button class="sm" ${idx <= 0 ? 'disabled' : ''} onclick="state.cycle=${L[idx - 1]?.no};render()">◀</button>
+      <select onchange="state.cycle=Number(this.value);render()">${L.map(x => `<option value="${x.no}" ${x.no === c.no ? 'selected' : ''}>${x.no}차 (${fmtD(x.start)}~)</option>`).join('')}</select>
+      <button class="sm" ${idx >= L.length - 1 ? 'disabled' : ''} onclick="state.cycle=${L[idx + 1]?.no};render()">▶</button>
+      <span class="pill ${status === '종료' ? 'mut' : 'ok'}">${status}</span>
+    </div>
+    <h2 style="margin:12px 0 4px">${c.no}차 · ${fmtD(c.start)} ~ ${fmtD(c.end)}</h2>
+    <div class="muted">휴강: ${esc(c.note || '없음')} · 월수금 기준 ${cycleSessions({ days: ['월', '수', '금'] }, c)}회</div>
+    <div class="row" style="margin-top:8px"><label class="inl">결제 마감일 (문자 {마감일})<input type="date" value="${c.payDue || c.start}" onchange="setCycle(${c.no},'payDue',this.value)"></label></div>
+  </div>
+  ${sentCnt < studs.length && t <= c.start ? `<div class="banner"><strong>📩 ${c.no}차 안내 문자를 아직 ${studs.length - sentCnt}명에게 안 보냈어요.</strong><span class="muted">아래에서 복사해 보내고 '보냄'을 체크하세요.</span></div>` : ''}
+  <div class="stats">
+    <div class="stat"><div class="l">${c.no}차 청구 예정</div><div class="v">${won(expect)}</div><div class="s">재원생 ${studs.length}명</div></div>
+    <div class="stat"><div class="l">납부 완료</div><div class="v">${paidCnt}명</div><div class="s">${won(paidSum)}</div></div>
+    <div class="stat"><div class="l">미납</div><div class="v" style="color:var(--warn)">${unpaid.length}명</div><div class="s">${won(unpaid.reduce((a, s) => a + feeP(s, P), 0))}</div></div>
+    <div class="stat"><div class="l">안내 문자</div><div class="v">${sentCnt} / ${studs.length}</div><div class="s">보냄</div></div>
+  </div>
+  ${dailyCard(P)}
+  ${msgSection(P, 'ctpl', `${c.no}차 원비 문자 <span class="muted">· 마감 ${fmtD(c.payDue || c.start)}</span>`)}
+  <div class="card" style="margin-top:14px"><h2>${c.no}차 납부 현황</h2>
+    <p class="muted">결제일이 '차수 시작 2주 전 ~ 다음 차수 시작 2주 전' 사이면 이 차수 원비로 봅니다. 횟수는 학생 요일에서 휴강일을 뺀 수입니다.</p>
+    <div class="tbl"><table><thead><tr><th>학생</th><th class="num">횟수</th><th class="num">원비</th><th>납부</th><th>문자</th><th>추가 수업</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
+  <div class="card"><details><summary style="cursor:pointer"><strong>차수 일정 고치기</strong></summary>
+    <p class="muted">휴강일은 '10/5, 10/9'처럼 날짜만 쓰면 횟수 계산에서 빠지고, '문자에 쓰는 휴강 안내'는 {휴강일} 칸에 그대로 들어갑니다.</p>
+    <div class="tbl"><table><thead><tr><th>차수</th><th>시작</th><th>종료</th><th>휴강일(계산용)</th><th>문자에 쓰는 휴강 안내</th><th>월수금 횟수</th><th></th></tr></thead><tbody>
+    ${L.map(x => `<tr><td>${x.no}차</td>
+      <td><input type="date" value="${x.start}" onchange="setCycle(${x.no},'start',this.value)"></td>
+      <td><input type="date" value="${x.end}" onchange="setCycle(${x.no},'end',this.value)"></td>
+      <td><input value="${x.off.map(d => d.slice(5).replace('-', '/').replace(/^0/, '').replace('/0', '/')).join(', ')}" onchange="setCycle(${x.no},'off',this.value)" style="width:140px"></td>
+      <td><input value="${esc(x.note)}" onchange="setCycle(${x.no},'note',this.value)" style="width:260px"></td>
+      <td class="num">${cycleSessions({ days: ['월', '수', '금'] }, x)}회</td>
+      <td><button class="sm" onclick="delCycle(${x.no})">삭제</button></td></tr>`).join('')}
+    </tbody></table></div>
+    <button class="sm" style="margin-top:8px" onclick="addCycle()">+ 다음 차수 추가</button>
+  </details></div>`;
+}
+
+function dailyCard(P) {
+  const list = Object.values(db.students).filter(s => s.active && s.billing === 'attend').sort(byOrder);
+  const lastDay = Object.values(db.attendance).flatMap(o => Object.keys(o)).sort().pop();
+  const md = d => fmtD(d);
+  return `<div class="card"><div class="row" style="margin-bottom:6px"><h2 style="margin:0">Daily 15회 정산</h2>
+      <button class="sm" onclick="document.getElementById('attFile').click()">출석부 엑셀 가져오기</button></div>
+    <p class="muted">Daily 학생은 출석 15회가 채워질 때마다 25,000원 × 15회 + 캐피타운으로 한 번 청구합니다. 남는 출석은 다음 15회로 넘어가요.
+      15회가 아직 안 찬 학생은 이번 청구 문자에서 빠집니다. 출석 기록: ${lastDay ? `${md(lastDay)}까지` : '없음'}</p>
+    ${list.length ? `<div class="tbl"><table><thead><tr><th>학생</th><th>정산 시작일</th><th>청구할 15회</th><th>다음 15회 진행</th><th></th></tr></thead><tbody>
+    ${list.map(s => { const D = dailyInfo(s), nm = esc(s.name); return `<tr>
+      <td><strong>${nm}</strong><div class="muted">지금까지 ${D.done}번 정산</div></td>
+      <td><input type="date" value="${s.attStart || DAILY_START}" onchange="setStu('${nm}','attStart',this.value)"></td>
+      <td>${D.pending.length ? D.pending.map(b => `<div><strong>${won((s.unit || 25000) * b.length + (s.extra || 0))}</strong>
+          <span class="muted" style="font-size:12px">${md(b[0])} ~ ${md(b[b.length - 1])} (${b.length}회)</span></div>`).join('')
+        : '<span class="muted">청구할 차례 아님</span>'}</td>
+      <td><span class="pill ${D.current.length >= D.size - 3 ? 'no' : 'mut'}">${D.current.length} / ${D.size}회</span>
+        <div class="muted" style="font-size:12px">${D.current.map(md).join(', ')}</div></td>
+      <td class="row">${D.pending.length ? `<button class="sm pri" onclick="dailySettle('${nm}',1)">결제 완료</button>` : ''}
+        ${D.done ? `<button class="sm" onclick="dailySettle('${nm}',-1)">되돌리기</button>` : ''}</td></tr>`; }).join('')}
+    </tbody></table></div>` : '<p class="muted">Daily 학생이 없습니다. 학생·원비 설정에서 결제 방식을 &quot;출석 정산(Daily)&quot;으로 바꾸세요.</p>'}
+  </div>`;
+}
+function dailySettle(name, d) { const s = db.students[name]; s.dailyPaid = Math.max(0, Math.min((s.dailyPaid || 0) + d, dailyInfo(s).blocks.length)); save(); render(); }
+
+function sessionCard() {
+  const list = Object.values(db.students).filter(s => s.active && s.billing === 'session').sort(byOrder);
+  if (!list.length) return `<div class="card"><h2>회차제 학생</h2><p class="muted">1회 25,000원씩 차감하는 학생은 '학생·원비 설정'에서 결제 방식을 '회차제'로 바꾸면 여기서 남은 횟수를 관리할 수 있어요.</p></div>`;
+  return `<div class="card"><h2>회차제 학생 · 남은 횟수</h2>
+    <p class="muted">수업한 날 '-1 수업'을 누르고, 결제를 받으면 '+충전'으로 횟수를 넣으세요. 2회 이하로 남으면 빨갛게 표시됩니다.</p>
+    <div class="tbl"><table><thead><tr><th>학생</th><th class="num">남은 횟수</th><th>${mNum(state.month)}월 예정</th><th></th></tr></thead><tbody>
+    ${list.map(s => { const r = remaining(s), last = (s.ledger || []).slice(-1)[0]; return `<tr>
+      <td><strong>${esc(s.name)}</strong><div class="muted">${esc(s.cls)}</div></td>
+      <td class="num"><span class="pill ${r <= 2 ? 'no' : 'ok'}">${r}회</span></td>
+      <td>${sessionsFor(s, state.month)}회 · ${won(feeFor(s, state.month))}</td>
+      <td class="row"><button class="sm" onclick="useSession('${esc(s.name)}')">-1 수업</button>
+        <button class="sm pri" onclick="chargeSession('${esc(s.name)}')">+충전</button>
+        <button class="sm" onclick="showLedger('${esc(s.name)}')">기록</button>
+        ${last ? `<button class="sm" onclick="undoLedger('${esc(s.name)}')">되돌리기</button>` : ''}</td></tr>`; }).join('')}
+    </tbody></table></div></div>`;
+}
+
+function viewMsg() {
+  const p = periodText(state.month);
+  return `${sendBanner()}${msgSection(monthP(state.month), 'tpl', `${mNum(state.month)}월 원비 문자 <span class="muted">· 결제 기간 ${p.range}</span>`)}`;
+}
+
+let curTplKey = 'tpl';
+function msgSection(P, tplKey, title) {
+  curTplKey = tplKey;
+  const tpl = db.templates.find(t => t.id === state[tplKey]) || db.templates[0];
+  const sent = db.sent[P.key] || {};
+  let studs = Object.values(db.students).filter(s => s.active && billable(s));
+  if (state.filter === 'unpaid') studs = studs.filter(s => !paidP(s.name, P).paid);
+  if (state.filter === 'paid') studs = studs.filter(s => paidP(s.name, P).paid);
+  if (state.filter === 'unsent') studs = studs.filter(s => !sent[s.name]);
+  studs.sort(byOrder);
+  // 반별 모드: 정액 학생은 '같은 반 + 같은 원비'끼리 하나의 멘트(이름 없이), Daily·회차제는 아이별
+  const byClass = db.settings.byClass !== false, units = [], groups = {};
+  studs.forEach(s => {
+    if (!byClass || s.billing !== 'monthly' || extrasOf(s.name, P).length) return units.push({ s, members: [s] });
+    const k = `${s.cls}|${feeP(s, P)}`;
+    if (!groups[k]) units.push(groups[k] = { s, members: [], group: true });
+    groups[k].members.push(s);
+  });
+  const cards = units.map(u => u.group ? classCard(u, tpl, P, sent) : oneCard(u.s, tpl, P, sent)).join('');
+  return msgHeader(P, tplKey, title, tpl, units.length, byClass) + `<div class="msgs">${cards || '<p class="muted">해당하는 학생이 없습니다.</p>'}</div>`;
+}
+// 결제창(결제 링크 청구항목)에 넣을 한 줄: 차수 + 횟수 + 기간
+const md = iso => iso.slice(5).replace('-', '/').replace(/^0/, '').replace('/0', '/');
+function payItemText(s, P) {
+  const st = db.settings, c = P.cycle;
+  let period;
+  if (s.billing === 'attend') { const a = attendedP(s); period = a.length ? `${md(a[0])}~${md(a[a.length - 1])}` : ''; }
+  else if (c) period = `${md(c.start)}~${md(c.end)}`;
+  else { const [y, m] = P.month.split('-').map(Number); period = `${m}/1~${m}/${new Date(y, m, 0).getDate()}`; }
+  const map = { '월': mNum(P.month), '차수': c ? `${c.no}차` : `${mNum(P.month)}월`, '횟수': countP(s, P), '기간': period, '반': s.cls || '', '학생': shortName(s.name) };
+  if (s.addon && s.billing === 'monthly') map['횟수'] = `${countP(s, P)}회+${s.addon.days.join('')}요일 추가 ${addonCount(s, P)}`;
+  const exN = extrasOf(s.name, P).reduce((a, x) => a + x.n, 0);
+  if (exN) map['횟수'] = `${map['횟수']}회+추가 ${exN}`;
+  return (s.billing === 'attend' ? st.payItemDaily : st.payItem).replace(/\{(.+?)\}/g, (m, k) => map[k] ?? m);
+}
+const payItemRow = text => `<div class="row" style="font-size:13px;background:var(--accent-soft);border-radius:7px;padding:6px 8px">
+  <span class="muted">결제창</span><strong style="flex:1">${esc(text)}</strong>
+  <button class="sm" data-copy="${encodeURIComponent(text)}" onclick="copyPlain(this)">결제창 복사</button></div>`;
+async function copyPlain(btn) { await copyText(decodeURIComponent(btn.dataset.copy)); toast('결제창 문구를 복사했어요'); }
+function oneCard(s, tpl, P, sent) {
+    const text = fillTemplate(tplFor(tpl, s).body, s, P);
+    const sms = s.phone ? `sms:${s.phone.replace(/[^\d+]/g, '')}?body=${encodeURIComponent(text)}` : '';
+    return `<div class="msg ${sent[s.name] ? 'sent' : ''}">
+      <div class="row"><strong>${esc(s.name)}</strong><span class="muted">${esc(s.phone || '번호 없음')}</span>
+        ${paidP(s.name, P).paid ? '<span class="pill ok">납부</span>' : '<span class="pill no">미납</span>'}</div>
+      <pre>${esc(text)}</pre>
+      ${payItemRow(payItemText(s, P))}
+      <div class="row">
+        <button class="pri sm" data-copy="${encodeURIComponent(text)}" data-name="${esc(s.name)}" data-key="${P.key}" onclick="copyMsg(this)">복사</button>
+        ${sms ? `<a class="btn sm" href="${sms}" onclick="markSent('${esc(s.name)}',true,'${P.key}')">문자 앱 열기</a>` : ''}
+        <label class="muted"><input type="checkbox" ${sent[s.name] ? 'checked' : ''} onchange="markSent('${esc(s.name)}',this.checked,'${P.key}')"> 보냄</label>
+      </div></div>`;
+}
+function classCard(u, tpl, P, sent) {
+  const t = CLASS_TPL[tpl.id] ? (db.templates.find(x => x.id === CLASS_TPL[tpl.id]) || tpl) : tpl;
+  const label = u.s.cls || '';
+  const text = fillTemplate(t.body, { ...u.s, name: label }, P);
+  const names = u.members.map(m => m.name), allSent = names.every(n => sent[n]);
+  const phones = u.members.map(m => (m.phone || '').replace(/[^\d+]/g, '')).filter(Boolean);
+  const noPhone = u.members.filter(m => !m.phone).map(m => m.name);
+  const sms = phones.length ? `sms:${phones.join(',')}?body=${encodeURIComponent(text)}` : '';
+  const nj = esc(names.join('|'));
+  return `<div class="msg ${allSent ? 'sent' : ''}">
+      <div class="row"><strong>${esc(label)}</strong><span class="pill mut">${names.length}명</span></div>
+      <div class="muted" style="font-size:12px">받는 분: ${u.members.map(m => `${esc(m.name)}${paidP(m.name, P).paid ? ' ✓' : ''}`).join(', ')}${noPhone.length ? ` · 번호 없음: ${esc(noPhone.join(', '))}` : ''}</div>
+      <pre>${esc(text)}</pre>
+      ${payItemRow(payItemText(u.s, P))}
+      <div class="row">
+        <button class="pri sm" data-copy="${encodeURIComponent(text)}" data-name="${nj}" data-key="${P.key}" onclick="copyMsg(this)">복사</button>
+        ${sms ? `<a class="btn sm" href="${sms}" onclick="markSent('${nj}',true,'${P.key}')">단체 문자 열기 (${phones.length}명)</a>` : ''}
+        <label class="muted"><input type="checkbox" ${allSent ? 'checked' : ''} onchange="markSent('${nj}',this.checked,'${P.key}')"> 보냄</label>
+      </div></div>`;
+}
+function msgHeader(P, tplKey, title, tpl, n, byClass) {
+  const vars = ['학생', '금액', '반', '항목', '차수', '수업기간', '휴강일', '월', '결제기간', '마감일', '결제방법', '서명', '학원', '횟수', '회당금액', '잔여횟수', '수업요일', '캐피타운'];
+  return `
+  <div class="card">
+    <h2>${title}</h2>
+    <div class="row" style="margin-bottom:8px">
+      <select onchange="state['${tplKey}']=this.value;render()">${db.templates.map(t => `<option value="${t.id}" ${t.id === tpl.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
+      <select onchange="state.filter=this.value;render()">
+        ${[['all', '재원생 전체'], ['unpaid', '미납자만'], ['paid', '납부자만'], ['unsent', '아직 안 보낸 학생']].map(([k, l]) => `<option value="${k}" ${state.filter === k ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>
+      <select onchange="setSetting('byClass',this.value==='1');render()">
+        <option value="1" ${byClass ? 'selected' : ''}>반별로 묶어서 (이름 없이)</option>
+        <option value="0" ${byClass ? '' : 'selected'}>아이별로</option></select>
+      <button onclick="copyAll()">전체 복사 (${n}건)</button>
+      <button onclick="newTemplate()">+ 새 멘트</button>
+    </div>
+    <details><summary class="muted" style="cursor:pointer">멘트 수정하기 (자동 저장)</summary>
+      <div class="row" style="margin:8px 0"><input id="tplName" value="${esc(tpl.name)}" oninput="editTpl('name',this.value)">
+        ${db.templates.length > 1 ? `<button class="sm" onclick="delTemplate()">이 멘트 삭제</button>` : ''}</div>
+      <div class="chips">${vars.map(k => `<button onclick="insertVar('{${k}}')">{${k}}</button>`).join('')}</div>
+      <textarea id="tplBody" oninput="editTpl('body',this.value)">${esc(tpl.body)}</textarea>
+      <p class="muted">결제 안내 문구·서명은 '설정·백업' 탭에서 바꿀 수 있어요. '원비 안내'·'차수 원비 안내'를 고르면 회차제 학생에게는 회차제 멘트가 자동으로 들어갑니다. 학부모 번호를 넣으면 휴대폰에서 '문자 앱 열기'로 바로 보낼 수 있습니다.</p>
+    </details>
+  </div>`;
+}
+
+function viewMoney() {
+  const m = state.month, S = monthSummary(m);
+  const cats = ['임대료', '관리비·공과금', '강사 급여', '교재·도서', '프로그램', '간식·소모품', '광고·홍보', '세금·보험', '기타'];
+  const byCat = {}; S.exps.forEach(e => byCat[e.cat] = (byCat[e.cat] || 0) + (Number(e.amount) || 0));
+  // 최근 6개월
+  const months = Array.from({ length: 6 }, (_, i) => addMonth(m, i - 5));
+  const hist = months.map(k => { const s = monthSummary(k); return { k, inc: s.income, exp: s.expense }; });
+  const max = Math.max(1, ...hist.map(h => Math.max(h.inc, h.exp)));
+  return `<div class="stats">
+    <div class="stat"><div class="l">${mNum(m)}월 수입 (거래일 기준)</div><div class="v">${won(S.income)}</div><div class="s">${S.inMonth.length}건${S.noAmt ? ` · 현장결제 ${S.noAmt}건 금액 추정` : ''}</div></div>
+    <div class="stat"><div class="l">지출</div><div class="v">${won(S.expense)}</div><div class="s">${S.exps.length}건</div></div>
+    <div class="stat"><div class="l">순수익</div><div class="v" style="color:${S.income - S.expense < 0 ? 'var(--warn)' : 'var(--ok)'}">${won(S.income - S.expense)}</div></div>
+  </div>
+  <div class="grid2">
+    <div class="card"><h2>지출 기록</h2>
+      <div class="row" style="margin-bottom:10px">
+        <select id="exCat">${cats.map(c => `<option>${c}</option>`).join('')}</select>
+        <input id="exDesc" placeholder="내용" style="flex:1;min-width:100px">
+        <input id="exAmt" class="w-num" placeholder="금액" inputmode="numeric">
+        <button class="pri" onclick="addExpense()">추가</button>
+      </div>
+      <button class="sm" onclick="loadRecurring()">고정 지출 불러오기</button>
+      <div class="tbl"><table><tbody>${S.exps.map(e => `<tr><td>${esc(e.cat)}</td><td>${esc(e.desc)}</td>
+        <td class="num"><input class="w-num" value="${e.amount}" onchange="setExp('${e.id}',this.value)"></td>
+        <td><button class="sm" onclick="delExp('${e.id}')">삭제</button></td></tr>`).join('') || '<tr><td class="muted">아직 지출 기록이 없습니다.</td></tr>'}</tbody></table></div>
+    </div>
+    <div class="card"><h2>수입 구성</h2>
+      <table><tbody>${Object.entries(S.byMethod).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${won(v)}</td></tr>`).join('') || '<tr><td class="muted">수입 없음</td></tr>'}</tbody></table>
+      <h2 style="margin-top:16px">지출 항목별</h2>
+      <table><tbody>${Object.entries(byCat).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${won(v)}</td></tr>`).join('') || '<tr><td class="muted">지출 없음</td></tr>'}</tbody></table>
+    </div>
+  </div>
+  <div class="card"><h2>최근 6개월</h2>
+    <table><thead><tr><th>월</th><th>수입 / 지출</th><th class="num">수입</th><th class="num">지출</th><th class="num">순수익</th></tr></thead><tbody>
+    ${hist.map(h => `<tr><td>${mNum(h.k)}월</td><td style="width:40%"><div class="bar" style="width:${h.inc / max * 100}%"></div><div class="bar ex" style="width:${h.exp / max * 100}%;margin-top:3px"></div></td>
+      <td class="num">${won(h.inc)}</td><td class="num">${won(h.exp)}</td><td class="num">${won(h.inc - h.exp)}</td></tr>`).join('')}
+    </tbody></table></div>
+  <div class="card"><h2>고정 지출 목록 <span class="muted">· ${db.settings.fixedFrom ? `${mNum(db.settings.fixedFrom)}월부터 매달 자동으로 들어갑니다. 금액을 바꾸면 앞으로의 달에 적용되고, 이미 들어간 달은 위 '지출 기록'에서 고치세요.` : "매달 '고정 지출 불러오기'로 한 번에 추가"}</span></h2>
+    <table><tbody>${db.recurring.map(r => `<tr>
+      <td><select onchange="setRec('${r.id}','cat',this.value)">${cats.map(c => `<option ${c === r.cat ? 'selected' : ''}>${c}</option>`).join('')}</select></td>
+      <td><input value="${esc(r.desc)}" onchange="setRec('${r.id}','desc',this.value)"></td>
+      <td class="num"><input class="w-num" value="${r.amount}" onchange="setRec('${r.id}','amount',this.value)"></td>
+      <td><button class="sm" onclick="delRec('${r.id}')">삭제</button></td></tr>`).join('')}</tbody></table>
+    <button class="sm" style="margin-top:8px" onclick="addRec()">+ 고정 지출 추가</button>
+  </div>`;
+}
+
+function viewPay() {
+  const m = state.month;
+  const list = db.payments.filter(p => state.payBasis === 'bill' ? monthsOf(p).includes(m) : p.date.slice(0, 7) === m);
+  return `<div class="card"><div class="row" style="margin-bottom:10px">
+      <h2 style="margin:0">${mNum(m)}월 결제내역</h2>
+      <select onchange="state.payBasis=this.value;render()">
+        <option value="bill" ${state.payBasis === 'bill' ? 'selected' : ''}>원비 월 기준</option>
+        <option value="tx" ${state.payBasis === 'tx' ? 'selected' : ''}>결제한 날짜 기준</option></select>
+      <button class="pri" onclick="document.getElementById('xlsxFile').click()">새 결제내역 엑셀 가져오기</button>
+    </div>
+    <p class="muted">결제 사이트에서 받은 '통합결제내역' 엑셀을 매달 가져오면 겹치는 건 빼고 새 결제만 추가됩니다. 금액칸이 빈 현장결제는 직접 입력할 수 있어요.</p>
+    <div class="tbl"><table><thead><tr><th>날짜</th><th>학생</th><th>청구항목</th><th>수납방법</th><th class="num">금액</th><th></th></tr></thead><tbody>
+    ${list.map(p => `<tr style="${p.canceled ? 'text-decoration:line-through;opacity:.5' : ''}">
+      <td>${p.date.slice(5).replace('-', '/')} <span class="muted">${p.time}</span></td>
+      <td>${esc(p.student)}<div class="muted">${esc(p.cls)}</div></td>
+      <td>${esc(p.item)} ${isExtra(p.item) ? '<span class="pill mut">기타</span>' : ''}</td>
+      <td>${esc(p.method)}</td>
+      <td class="num"><input class="w-num" value="${p.amount ?? ''}" placeholder="추정 ${(db.students[canon(db, p.student)]?.fee || 0).toLocaleString()}" onchange="setPayAmt('${p.id}',this.value)"></td>
+      <td>${p.manualAdded ? `<button class="sm" onclick="delPay('${p.id}')">삭제</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">이 달 결제내역이 없습니다.</td></tr>'}
+    </tbody></table></div></div>`;
+}
+
+function viewStu() {
+  const list = Object.values(db.students).sort((a, b) => (b.active - a.active) || byOrder(a, b));
+  return `<div class="card"><div class="row" style="margin-bottom:8px"><h2 style="margin:0">학생·원비 설정</h2>
+      <button class="pri sm" onclick="addStudent()">+ 학생 추가</button></div>
+    <p class="muted">월정액은 '월 원비'를, 회차제는 '회당 금액 × 그 달 수업 요일 수'를 원비로 씁니다. 요일은 '월수금'처럼 붙여 쓰세요. 고친 값은 엑셀을 다시 가져와도 유지됩니다.</p>
+    <div class="tbl"><table><thead><tr><th>재원</th><th>학생</th><th>반·시간 (문자 {반})</th><th>요일</th><th>결제 방식</th><th class="num">월 원비 / 회당</th><th>수업(문자 {항목})</th><th>학부모 연락처</th><th>메모·결석 차감</th><th>입학일</th><th>마지막 납부</th></tr></thead><tbody>
+    ${list.map(s => `<tr style="${s.active ? '' : 'opacity:.55'}">
+      <td><input type="checkbox" ${s.active ? 'checked' : ''} onchange="setStu('${esc(s.name)}','active',this.checked)"></td>
+      <td><strong>${esc(s.name)}</strong></td>
+      <td><input value="${esc(s.cls)}" onchange="setStu('${esc(s.name)}','cls',this.value)" style="width:190px"></td>
+      <td><input value="${esc((s.days || []).join(''))}" onchange="setStu('${esc(s.name)}','days',this.value)" style="width:70px"></td>
+      <td><select onchange="setStu('${esc(s.name)}','billing',this.value)">
+        <option value="monthly" ${s.billing !== 'session' ? 'selected' : ''}>월정액</option>
+        <option value="attend" ${s.billing === 'attend' ? 'selected' : ''}>출석 정산(Daily)</option>
+        <option value="session" ${s.billing === 'session' ? 'selected' : ''}>회차제(선불 차감)</option></select></td>
+      <td class="num">${['session', 'attend'].includes(s.billing)
+        ? `<input class="w-num" value="${s.unit || 25000}" onchange="setStu('${esc(s.name)}','unit',this.value)"><div class="muted">회당${s.extra ? ` + 캐피 ${s.extra.toLocaleString()}` : ''}${s.fixedCount ? ` · ${s.fixedCount}회 고정` : ''}</div>`
+        : `<input class="w-num" value="${s.fee || ''}" onchange="setStu('${esc(s.name)}','fee',this.value)">${s.feeCheck ? '<div><span class="pill no">확인</span></div>' : ''}`}</td>
+      <td><input value="${esc(s.item)}" onchange="setStu('${esc(s.name)}','item',this.value)" style="width:150px"></td>
+      <td><input value="${esc(s.phone)}" placeholder="010-" inputmode="tel" onchange="setStu('${esc(s.name)}','phone',this.value)" style="width:130px"></td>
+      <td><input value="${esc(s.memo)}" onchange="setStu('${esc(s.name)}','memo',this.value)" style="width:180px"></td>
+      <td class="muted">${esc(s.enrolled || '-')}</td>
+      <td class="muted">${s.lastBill ? mNum(s.lastBill) + '월분' : '-'}</td></tr>`).join('')}
+    </tbody></table></div></div>
+  <div class="card"><h2>같은 학생 묶기</h2>
+    <p class="muted">결제 링크에 이름이 다르게 들어간 경우(예: '민지' → '김민지') 하나로 합칩니다.</p>
+    <table><tbody>${Object.entries(db.aliases).map(([a, b]) => `<tr><td>${esc(a)}</td><td>→ ${esc(b)}</td><td><button class="sm" onclick="delAlias('${esc(a)}')">삭제</button></td></tr>`).join('')}</tbody></table>
+    <div class="row" style="margin-top:8px"><input id="alA" placeholder="결제내역 이름"><span>→</span><input id="alB" placeholder="실제 학생 이름"><button onclick="addAlias()">묶기</button></div>
+  </div>`;
+}
+
+function viewSet() {
+  const st = db.settings;
+  const f = (k, l, type = 'text') => `<label class="inl">${l}<input ${type === 'number' ? 'class="w-num" type="number"' : 'style="width:100%"'} value="${esc(st[k])}" onchange="setSetting('${k}',this.value,'${type}')"></label>`;
+  return `<div class="card"><h2>문자 기본 정보</h2>
+    <div style="display:grid;gap:10px">
+      ${f('academy', '학원 이름 {학원}')}${f('sign', '서명 {서명}')}${f('payGuide', '결제 방법 안내 {결제방법} — 계좌번호나 결제 링크 안내 문구')}
+      ${f('payItem', '결제창 문구 — {월} {차수} {기간} {횟수} {반} {학생} 사용 가능')}${f('payItemDaily', '결제창 문구 (Daily 학생)')}
+      <div class="row">${f('sendFrom', '문자 보내는 시작일', 'number')}${f('sendTo', '결제 마감일', 'number')}${f('cutoffDay', '이 날짜부터 결제는 다음 달 원비로 계산', 'number')}</div>
+    </div></div>
+  <div class="card"><h2>백업</h2>
+    <p class="muted">데이터는 이 컴퓨터의 브라우저에만 저장됩니다. 한 달에 한 번 백업 파일을 받아 두세요.</p>
+    <div class="row"><button class="pri" onclick="exportJson()">백업 파일 받기</button>
+      <button onclick="document.getElementById('jsonFile').click()">백업 불러오기</button>
+      <button onclick="resetAll()">처음 상태로 초기화</button></div>
+  </div>`;
+}
+
+/* ---------- 동작 ---------- */
+function go(t) { state.tab = t; render(); scrollTo(0, 0); }
+function shiftMonth(d) { state.month = addMonth(state.month, d); render(); }
+function toast(t) { const e = document.getElementById('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove('on'), 1800); }
+async function copyText(t) { try { await navigator.clipboard.writeText(t); } catch (e) { const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); } }
+async function copyMsg(btn) { await copyText(decodeURIComponent(btn.dataset.copy)); markSent(btn.dataset.name, true, btn.dataset.key); toast('복사했어요 — 카톡/문자에 붙여 넣으세요'); }
+async function copyAll() {
+  const texts = [...document.querySelectorAll('.msg pre')].map(p => p.textContent);
+  await copyText(texts.join('\n\n────────\n\n')); toast(`${texts.length}건 복사했어요`);
+}
+function markSent(names, v, key = state.month) {
+  const m = db.sent[key] ||= {}; names.split('|').forEach(n => { if (v) m[n] = true; else delete m[n]; }); save(); setTimeout(render, 50);
+}
+function editTpl(k, v) { const t = db.templates.find(t => t.id === state[curTplKey]); t[k] = v; save();
+  clearTimeout(editTpl._t); editTpl._t = setTimeout(() => { const ae = document.activeElement?.id, pos = document.activeElement?.selectionStart; render();
+    const det = document.getElementById('tplBody').closest('details'); if (det) det.open = true; const el = ae && document.getElementById(ae); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {} } }, 500); }
+function insertVar(v) { const ta = document.getElementById('tplBody'); const s = ta.selectionStart, e = ta.selectionEnd; ta.value = ta.value.slice(0, s) + v + ta.value.slice(e); ta.focus(); ta.setSelectionRange(s + v.length, s + v.length); editTpl('body', ta.value); }
+function newTemplate() { const t = { id: uid(), name: '새 멘트', body: '[{학원}] 안녕하세요, {학생} 학부모님.\n\n{서명}' }; db.templates.push(t); state[curTplKey] = t.id; save(); render(); document.getElementById('tplBody').closest('details').open = true; }
+function delTemplate() { if (!confirm('이 멘트를 삭제할까요?')) return; db.templates = db.templates.filter(t => t.id !== state[curTplKey]); state[curTplKey] = db.templates[0].id; save(); render(); }
+function manualPay(name, key = state.month) {
+  const P = key.startsWith('c') ? cycleP(Number(key.slice(1))) : monthP(key);
+  const s = db.students[name]; const a = prompt(`${name} ${P.label} 납부 금액 (현금·계좌이체 등 엑셀에 없는 결제)`, feeP(s, P) || ''); if (a == null) return;
+  const method = prompt('수납 방법', '계좌이체') || '수동';
+  (db.manualPaid[key] ||= {})[name] = { amount: toNum(a) || 0, method, date: today() }; save(); render();
+}
+const today = () => { const t = new Date(); return `${t.getMonth() + 1}/${t.getDate()}`; };
+function useSession(name) { db.students[name].ledger.push({ type: 'use', n: 1, date: today() }); save(); render(); toast(`${name} 1회 차감`); }
+function chargeSession(name) {
+  const s = db.students[name]; const n = toNum(prompt(`${name} 충전할 횟수 (1회 ${won(s.unit)})`, sessionsFor(s, state.month))); if (!n) return;
+  s.ledger.push({ type: 'charge', n, date: today(), note: `${mNum(state.month)}월분` }); save(); render();
+}
+function undoLedger(name) { const e = db.students[name].ledger.pop(); save(); render(); toast(`${e.date} ${e.type === 'use' ? '차감' : '충전'} 취소`); }
+function showLedger(name) {
+  const L = db.students[name].ledger; let r = 0;
+  const lines = L.map(e => { r += e.type === 'charge' ? e.n : -e.n; return `${e.date}  ${e.type === 'charge' ? `+${e.n}회 충전 ${e.note || ''}` : `-${e.n}회 수업`}  → 남은 ${r}회`; });
+  alert(`${name} 회차 기록\n\n${lines.slice(-25).join('\n') || '기록 없음'}`);
+}
+function extraCell(s, P) {
+  const nm = esc(s.name);
+  return extrasOf(s.name, P).map(x => `<div style="font-size:12px;white-space:nowrap">${esc(x.desc)} ${x.n}회 · ${won(x.n * x.unit)}
+    <button class="sm" style="padding:0 6px" title="삭제" onclick="delExtra('${nm}','${P.key}','${x.id}')">✕</button></div>`).join('')
+    + `<button class="sm" onclick="addExtra('${nm}','${P.key}')">+ 추가</button>`;
+}
+function addExtra(name, key) {
+  const desc = prompt(`${name} 추가 내용 (예: 추가 수업, 보강, 특강)`, '추가 수업'); if (desc == null) return;
+  const n = toNum(prompt('횟수', '1')); if (!n) return;
+  const unit = toNum(prompt('1회 금액', '25000')); if (unit == null) return;
+  ((db.extras ||= {})[key] ||= {})[name] ||= [];
+  db.extras[key][name].push({ id: uid(), desc: desc.trim() || '추가 수업', n, unit }); save(); render();
+  toast(`${name} ${desc} ${n}회 · ${won(n * unit)} 추가`);
+}
+function delExtra(name, key, id) { db.extras[key][name] = db.extras[key][name].filter(x => x.id !== id); save(); render(); }
+function unmanual(name, key = state.month) { delete db.manualPaid[key][name]; save(); render(); }
+function setCycle(no, k, v) {
+  const c = db.cycles.find(x => x.no === no);
+  if (k === 'off') {
+    const y0 = Number(c.start.slice(0, 4)), m0 = Number(c.start.slice(5, 7));
+    c.off = [...v.matchAll(/(\d{1,2})\/(\d{1,2})/g)].map(([, m, d]) => `${Number(m) < m0 ? y0 + 1 : y0}-${pad(m)}-${pad(d)}`);
+  } else c[k] = v;
+  save(); render();
+}
+function addCycle() {
+  const L = cyclesSorted(), last = L[L.length - 1];
+  const start = last ? addDays(last.end, 2) : todayISO();
+  db.cycles.push({ no: (last?.no || 0) + 1, start, end: addDays(start, 26), off: [], note: '없음', payDue: start }); save(); render();
+}
+function delCycle(no) { if (!confirm(`${no}차를 삭제할까요?`)) return; db.cycles = db.cycles.filter(c => c.no !== no); save(); render(); }
+function addExpense() {
+  const amt = toNum(document.getElementById('exAmt').value); if (!amt) return toast('금액을 입력하세요');
+  db.expenses.push({ id: uid(), month: state.month, cat: document.getElementById('exCat').value, desc: document.getElementById('exDesc').value, amount: amt }); save(); render();
+}
+function setExp(id, v) { db.expenses.find(e => e.id === id).amount = toNum(v) || 0; save(); render(); }
+function delExp(id) { db.expenses = db.expenses.filter(e => e.id !== id); save(); render(); }
+function loadRecurring() {
+  const have = new Set(db.expenses.filter(e => e.month === state.month).map(e => e.cat + e.desc)); let n = 0;
+  db.recurring.forEach(r => { if (!have.has(r.cat + r.desc)) { db.expenses.push({ id: uid(), month: state.month, cat: r.cat, desc: r.desc, amount: Number(r.amount) || 0 }); n++; } });
+  save(); render(); toast(n ? `고정 지출 ${n}건 추가` : '이미 다 들어가 있어요');
+}
+function setRec(id, k, v) { const r = db.recurring.find(r => r.id === id); r[k] = k === 'amount' ? (toNum(v) || 0) : v; save(); }
+function addRec() { db.recurring.push({ id: uid(), cat: '기타', desc: '', amount: 0 }); save(); render(); }
+function delRec(id) { db.recurring = db.recurring.filter(r => r.id !== id); save(); render(); }
+function setPayAmt(id, v) { db.payments.find(p => p.id === id).amount = toNum(v); save(); }
+function delPay(id) { db.payments = db.payments.filter(p => p.id !== id); save(); render(); }
+function setStu(name, k, v) {
+  const s = db.students[name];
+  if (k === 'fee') { s.fee = toNum(v) || 0; s.feeEdited = true; s.feeCheck = false; }
+  else if (k === 'active') { s.active = v; s.activeEdited = true; }
+  else if (k === 'unit') s.unit = toNum(v) || 25000;
+  else if (k === 'days') s.days = [...v].filter(c => DOW.includes(c));
+  else if (k === 'billing') { s.billing = v; s.unit ||= 25000; s.ledger ||= []; }
+  else { s[k] = v; if (k === 'item') s.itemEdited = true; if (k === 'cls') s.clsEdited = true; }
+  save(); if (['active', 'billing', 'days', 'attStart'].includes(k)) render();
+}
+function addStudent() {
+  const name = prompt('학생 이름'); if (!name || db.students[name]) return;
+  const fee = toNum(prompt('월 원비', '388000')) || 0;
+  db.students[name] = { name, cls: prompt('반·수업시간 (예: 월·수·금 3:30-5:30)', '') || '', days: [...(prompt('수업 요일 (예: 월수금)', '월수금') || '')].filter(c => DOW.includes(c)),
+    item: '주 3회 + CappyTown', fee, phone: '', parent: '', memo: '', active: true, feeEdited: true, activeEdited: true, clsEdited: true, itemEdited: false,
+    billing: 'monthly', unit: 25000, ledger: [], order: 500 };
+  save(); render();
+}
+function addAlias() { const a = document.getElementById('alA').value.trim(), b = document.getElementById('alB').value.trim(); if (!a || !b) return;
+  db.aliases[a] = b; if (db.students[a] && a !== b) delete db.students[a]; rebuildStudents(db); save(); render(); }
+function delAlias(a) { delete db.aliases[a]; rebuildStudents(db); save(); render(); }
+function setSetting(k, v, type) { db.settings[k] = type === 'number' ? Number(v) : v; save(); }
+function exportJson() {
+  const b = new Blob([JSON.stringify(db, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `HEI원비관리_백업_${new Date().toISOString().slice(0, 10)}.json`; a.click();
+}
+function resetAll() { if (!confirm('모든 수정 내용(연락처, 지출, 멘트)을 지우고 처음 엑셀 데이터로 되돌릴까요?')) return; localStorage.removeItem(KEY); db = load(); save(); render(); }
+
+document.getElementById('tabs').onclick = e => { if (e.target.dataset.t) go(e.target.dataset.t); };
+document.getElementById('xlsxFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    if (!window.XLSX) throw new Error('엑셀 읽기 도구를 불러오지 못했어요 (인터넷 연결 확인)');
+    const wb = XLSX.read(await f.arrayBuffer());
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+    const h = rows.findIndex(r => r.includes('학생명'));
+    if (h < 0) throw new Error('학생명 열을 찾지 못했어요');
+    const n = importRows(db, rows[h], rows.slice(h + 1)); save(); render(); toast(`새 결제 ${n}건 추가`);
+  } catch (err) { alert(err.message); }
+  e.target.value = '';
+};
+// 출석부 엑셀: "2026년 9월 반이름" 제목, 날짜(1~31) 머리줄, '출결상태' 줄에 V(출석)/×(결석)
+document.getElementById('attFile').onchange = async e => {
+  const files = [...e.target.files]; if (!files.length) return;
+  try {
+    if (!window.XLSX) throw new Error('엑셀 읽기 도구를 불러오지 못했어요 (인터넷 연결 확인)');
+    const att = {};
+    for (const f of files) {
+      const wb = XLSX.read(await f.arrayBuffer());
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' }).map(r => r.map(v => String(v).trim()));
+      let ymv = null; rows.forEach(r => r.forEach(v => { const m = v.match(/(\d{4})년\s*(\d{1,2})월/); if (m && !ymv) ymv = [m[1], pad(m[2])]; }));
+      const h = rows.findIndex(r => r.includes('이름') && r.includes('1'));
+      if (!ymv || h < 0) throw new Error(`${f.name}: 출석부 형식이 아닙니다`);
+      const hdr = rows[h], ni = hdr.indexOf('이름'), d1 = hdr.indexOf('1');
+      rows.slice(h + 1).filter(r => r.includes('출결상태')).forEach(r => {
+        const name = r[ni] || r.find((v, i) => i > 0 && v && v !== '출결상태');
+        hdr.forEach((v, i) => { if (i >= d1 && /^\d+$/.test(v) && /^(V|×|X|x)$/.test(r[i] || ''))
+          (att[name] ||= {})[`${ymv[0]}-${ymv[1]}-${pad(v)}`] = r[i] === 'V' ? 'V' : 'X'; });
+      });
+    }
+    const n = mergeAttendance(db, att); save(); render(); toast(`출석부 ${files.length}개 · ${n}칸 반영`);
+  } catch (err) { alert(err.message); }
+  e.target.value = '';
+};
+document.getElementById('jsonFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const d = JSON.parse(await f.text()); if (!d.payments) throw 0; db = { ...blank(), ...d, settings: { ...DEFAULT_SETTINGS, ...d.settings } }; if (!db.cycles.length && window.HEI_CYCLES) db.cycles = HEI_CYCLES.list.map(c => ({ ...c, payDue: c.start })); state.cycle = defaultCycle(); save(); render(); toast('백업을 불러왔어요'); } catch (err) { alert('백업 파일이 아닙니다'); }
+  e.target.value = '';
+};
+db = load();
+state = { tab: 'cycle', month: currentBillingMonth(), cycle: defaultCycle(), tpl: 't1', ctpl: 't6', filter: 'all', payBasis: 'bill' };
+save(); render();
+</script>
+</body>
+</html>
