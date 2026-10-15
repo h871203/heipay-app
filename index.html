@@ -9,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
   // 명단·차수·출석 파일을 고치면 바로 반영되도록 항상 새로 읽습니다
-  ['seed-data.js', 'roster.js', 'cycles.js', 'attendance-data.js'].forEach(f => document.write(`<script src="${f}?t=${Date.now()}"><\/script>`));
+  ['seed-data.js', 'roster.js', 'cycles.js', 'attendance-data.js', 'payments-recent.js'].forEach(f => document.write(`<script src="${f}?t=${Date.now()}"><\/script>`));
 </script>
 <style>
 :root{
@@ -275,7 +275,18 @@ function load() {
   d.cycles ||= [];
   d.attendance ||= {};
   if (window.HEI_ATTENDANCE) mergeAttendance(d, HEI_ATTENDANCE);
+  if (window.HEI_RECENT_PAYMENTS) mergeRecentPayments(d, HEI_RECENT_PAYMENTS);
   return d;
+}
+// 결제 사이트 화면에서 옮긴 수납 기록(엑셀이 오기 전 임시) — 같은 날·학생·항목의 실제 엑셀 기록이 있으면 넣지 않음
+const sameTx = (d, a, b) => a.date === b.date && canon(d, a.student) === canon(d, b.student) && a.item === b.item;
+function mergeRecentPayments(d, list) {
+  list.forEach(r => {
+    const key = `shot|${r.date}|${r.student}|${r.item}`;
+    if (d.payments.some(p => p.key === key || (p.source !== 'shot' && sameTx(d, p, r)))) return;
+    d.payments.push({ id: uid(), key, source: 'shot', date: r.date, time: '', cls: r.cls || '', student: r.student, item: r.item, method: r.method, amount: r.amount ?? null, canceled: false });
+  });
+  d.payments.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 }
 function mergeAttendance(d, att) {
   let n = 0;
@@ -437,6 +448,7 @@ function importRows(d, header, rows) {
     const key = `${r[I.dt]}|${r[I.stu]}|${r[I.item]}`;
     if (have.has(key)) continue;
     const a = (toNum(r[I.tax]) || 0) + (toNum(r[I.notax]) || 0);
+    d.payments = d.payments.filter(p => !(p.source === 'shot' && sameTx(d, p, { date: pd.date, student: String(r[I.stu]).trim(), item: String(r[I.item] || '') })));
     d.payments.push({ id: uid(), key, date: pd.date, time: pd.time, cls: String(r[I.cls] || ''), student: String(r[I.stu]).trim(),
       item: String(r[I.item] || ''), method: String(r[I.method] || ''), amount: a > 0 ? a : null,
       canceled: !!(I.cdate >= 0 && r[I.cdate]) || !!(I.camt >= 0 && toNum(r[I.camt])) });
