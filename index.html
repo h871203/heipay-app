@@ -114,7 +114,7 @@ const mNum = k => Number(k.split('-')[1]);
 const DOW = ['일','월','화','수','목','금','토'];
 
 // 모든 멘트 첫머리 고정: [HEI English] {반}반 / 안녕하세요, 학부모님 / {월}월 원비 안내드립니다.
-const TEMPLATE_VERSION = 2;
+const TEMPLATE_VERSION = 3;
 const DEFAULT_TEMPLATES = [
   { id: 't6', name: '차수 원비 안내', body:
 `[{학원}] {반}반
@@ -186,14 +186,13 @@ const DEFAULT_TEMPLATES = [
 
 {결제방법}
 {서명}` },
-  { id: 't8', name: 'Daily 출석 정산 안내', body:
+  { id: 't8', name: 'Daily 15회 안내', body:
 `[{학원}] {반}반
 안녕하세요, 학부모님
 {월}월 원비 안내드립니다.
 
 ▪ 수업 기간: {정산기간}
-▪ 출석: {횟수}회
-  ({출석일})
+  ({출석현황})
 ▪ 수업료: {회당금액} × {횟수}회{캐피타운} = {금액}
 ▪ 결제 마감: {마감일}
 
@@ -262,7 +261,8 @@ function load() {
   try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.payments) d = { ...blank(), ...s, settings: { ...DEFAULT_SETTINGS, ...s.settings } }; } catch (e) {}
   if (!d) { d = blank(); if (window.HEI_SEED) importRows(d, HEI_SEED.header, HEI_SEED.rows); }
   if ((d.tplVersion || 0) < TEMPLATE_VERSION) {
-    DEFAULT_TEMPLATES.forEach(t => { const i = d.templates.findIndex(x => x.id === t.id); if (i >= 0) d.templates[i] = { ...t }; });
+    DEFAULT_TEMPLATES.forEach(t => { const i = d.templates.findIndex(x => x.id === t.id);
+      if (i >= 0 && ((d.tplVersion || 0) < 2 || t.id === 't8')) d.templates[i] = { ...t }; });
     d.settings.payItem = DEFAULT_SETTINGS.payItem; d.settings.payItemDaily = DEFAULT_SETTINGS.payItemDaily;
     d.tplVersion = TEMPLATE_VERSION;
   }
@@ -274,7 +274,7 @@ function load() {
   if (C && (d.cyclesVersion || 0) < C.VERSION) { d.cycles = C.list.map(c => ({ ...c, payDue: c.start })); d.cyclesVersion = C.VERSION; }
   d.cycles ||= [];
   d.attendance ||= {};
-  if (window.HEI_ATTENDANCE && !d.attSeeded) { mergeAttendance(d, HEI_ATTENDANCE); d.attSeeded = true; }
+  if (window.HEI_ATTENDANCE) mergeAttendance(d, HEI_ATTENDANCE);
   return d;
 }
 function mergeAttendance(d, att) {
@@ -318,12 +318,15 @@ const cycleP = no => { const c = db.cycles.find(x => x.no === no); return { key:
 const DAILY_START = '2026-09-11';
 function dailyInfo(s) {
   const size = s.blockSize || 15, all = attended(s.name, s.attStart || DAILY_START, '9999-12-31'), blocks = [];
-  for (let i = 0; i + size <= all.length; i += size) blocks.push(all.slice(i, i + size));
+  for (let i = 0; i < all.length; i += size) blocks.push(all.slice(i, i + size));
+  // 묶음은 첫 출석이 생기면 시작되고, 그때부터 15회분을 청구합니다. dailyPaid = 결제 받은 묶음 수
   const done = Math.min(s.dailyPaid || 0, blocks.length);
-  return { size, blocks, done, pending: blocks.slice(done), current: all.slice(blocks.length * size) };
+  const cur = blocks[blocks.length - 1] || [];
+  return { size, blocks, done, pending: blocks.slice(done), current: cur.length < size ? cur : [],
+    prepaid: Math.max(0, (s.dailyPaid || 0) * size - all.length) };
 }
 const attendedP = s => dailyInfo(s).pending.flat();
-const countP = (s, P) => s.billing === 'attend' ? attendedP(s).length : P.isCycle ? (s.fixedCount || cycleSessions(s, P.cycle)) : sessionsFor(s, P.month);
+const countP = (s, P) => s.billing === 'attend' ? dailyInfo(s).pending.length * dailyInfo(s).size : P.isCycle ? (s.fixedCount || cycleSessions(s, P.cycle)) : sessionsFor(s, P.month);
 const extraP = s => (s.extra || 0) * (s.billing === 'attend' ? dailyInfo(s).pending.length : 1);
 // 정액 + 추가 수업(예: 화요일 1시간 추가 1회 25,000원) — 그 기간 안의 해당 요일 수만큼
 const addonCount = (s, P) => !s.addon ? 0 : P.isCycle ? cycleSessions({ days: s.addon.days }, P.cycle) : countDays(P.month, s.addon.days);
@@ -368,6 +371,7 @@ function applyRoster(d) {
     if (r.phone) s.phone = r.phone;
     s.enrolled = r.enrolled || s.enrolled || ''; if (r.memo) s.memo = r.memo;
     s.addon = r.addon ? { ...r.addon, days: [...r.addon.days] } : null;
+    if (r.attStart && s.attStartSet !== `${r.attStart}|${r.dailyPaid}`) { s.attStart = r.attStart; s.dailyPaid = r.dailyPaid || 0; s.attStartSet = `${r.attStart}|${r.dailyPaid}`; }
     s.ledger ||= [];
   });
   if (R.recurring && d.recurring.every(x => !Number(x.amount))) d.recurring = R.recurring.map(x => ({ id: uid(), ...x }));
@@ -533,7 +537,8 @@ function fillTemplate(body, s, P) {
     '횟수': countP(s, P), '회당금액': won(s.unit || 25000), '캐피타운': s.extra ? ` + 캐피타운 ${won(extraP(s))}` : '', '잔여횟수': remaining(s), '수업요일': (s.days || []).join('·'),
     '차수': c ? `${c.no}차` : `${mNum(P.month)}월`, '수업기간': c ? `${fmtD(c.start)} ~ ${fmtD(c.end)}` : `${mNum(P.month)}월`,
     '휴강일': c ? (c.note || '없음') : '',
-    '정산기간': (a => a.length ? `${fmtD(a[0])} ~ ${fmtD(a[a.length - 1])}` : '-')(attendedP(s)),
+    '정산기간': (D => D.pending.map(b => `${fmtD(b[0])} ~ ${b.length >= D.size ? fmtD(b[b.length - 1]) : `${D.size}회 완료 시까지`}`).join(', ') || '-')(dailyInfo(s)),
+    '출석현황': (D => D.pending.map(b => b.length >= D.size ? `${D.size}회 완료` : `${fmtD(Object.keys(db.attendance[s.name] || {}).sort().pop() || todayISO())} 현재 ${b.length}회 진행, ${D.size - b.length}회 남음`).join(', ') || '-')(dailyInfo(s)),
     '출석일': attendedP(s).map(d => d.slice(5).replace('-', '/').replace(/^0/, '').replace('/0', '/')).join(', ') || '-',
     '결제기간': p.range, '마감일': p.due, '결제방법': st.payGuide, '서명': st.sign, '학부모': s.parent || `${shortName(s.name)} 학부모` };
   return body.replace(/\{(.+?)\}/g, (m, k) => map[k] ?? m);
@@ -653,23 +658,25 @@ function dailyCard(P) {
   const md = d => fmtD(d);
   return `<div class="card"><div class="row" style="margin-bottom:6px"><h2 style="margin:0">Daily 15회 정산</h2>
       <button class="sm" onclick="document.getElementById('attFile').click()">출석부 엑셀 가져오기</button></div>
-    <p class="muted">Daily 학생은 출석 15회가 채워질 때마다 25,000원 × 15회 + 캐피타운으로 한 번 청구합니다. 남는 출석은 다음 15회로 넘어가요.
-      15회가 아직 안 찬 학생은 이번 청구 문자에서 빠집니다. 출석 기록: ${lastDay ? `${md(lastDay)}까지` : '없음'}</p>
-    ${list.length ? `<div class="tbl"><table><thead><tr><th>학생</th><th>정산 시작일</th><th>청구할 15회</th><th>다음 15회 진행</th><th></th></tr></thead><tbody>
-    ${list.map(s => { const D = dailyInfo(s), nm = esc(s.name); return `<tr>
-      <td><strong>${nm}</strong><div class="muted">지금까지 ${D.done}번 정산</div></td>
-      <td><input type="date" value="${s.attStart || DAILY_START}" onchange="setStu('${nm}','attStart',this.value)"></td>
-      <td>${D.pending.length ? D.pending.map(b => `<div><strong>${won((s.unit || 25000) * b.length + (s.extra || 0))}</strong>
-          <span class="muted" style="font-size:12px">${md(b[0])} ~ ${md(b[b.length - 1])} (${b.length}회)</span></div>`).join('')
-        : '<span class="muted">청구할 차례 아님</span>'}</td>
-      <td><span class="pill ${D.current.length >= D.size - 3 ? 'no' : 'mut'}">${D.current.length} / ${D.size}회</span>
-        <div class="muted" style="font-size:12px">${D.current.map(md).join(', ')}</div></td>
-      <td class="row">${D.pending.length ? `<button class="sm pri" onclick="dailySettle('${nm}',1)">결제 완료</button>` : ''}
-        ${D.done ? `<button class="sm" onclick="dailySettle('${nm}',-1)">되돌리기</button>` : ''}</td></tr>`; }).join('')}
-    </tbody></table></div>` : '<p class="muted">Daily 학생이 없습니다. 학생·원비 설정에서 결제 방식을 &quot;출석 정산(Daily)&quot;으로 바꾸세요.</p>'}
+    <p class="muted">출석을 15회씩 끊습니다. 새 15회가 시작되면(첫 출석) 25,000원 × 15회 + 캐피타운을 청구하고, 결제를 받으면 '결제 완료'를 누르세요.
+      출석 기록: ${lastDay ? `${md(lastDay)}까지` : '없음'}</p>
+    ${list.length ? list.map(s => { const D = dailyInfo(s), nm = esc(s.name), fee = (s.unit || 25000) * D.size + (s.extra || 0);
+      return `<div style="border-top:1px solid var(--line);padding:10px 0">
+        <div class="row"><strong>${nm}</strong>
+          <label class="inl" style="flex-direction:row;align-items:center;gap:6px">시작일 <input type="date" value="${s.attStart || DAILY_START}" onchange="setStu('${nm}','attStart',this.value)"></label>
+          <span class="muted">결제한 15회: ${s.dailyPaid || 0}번</span>
+          <button class="sm pri" onclick="dailySettle('${nm}',1)">결제 완료 +1</button>
+          ${s.dailyPaid ? `<button class="sm" onclick="dailySettle('${nm}',-1)">되돌리기</button>` : ''}</div>
+        <div class="tbl"><table><tbody>${D.blocks.map((b, i) => `<tr>
+          <td style="white-space:nowrap">${i + 1}번째 15회</td>
+          <td>${md(b[0])} ~ ${b.length >= D.size ? md(b[b.length - 1]) : '진행 중'}</td>
+          <td class="num"><span class="pill ${b.length >= D.size ? 'mut' : 'no'}">${b.length} / ${D.size}회</span></td>
+          <td>${i < (s.dailyPaid || 0) ? '<span class="pill ok">결제 완료</span>' : `<span class="pill no">청구 ${won(fee)}</span>`}</td></tr>`).join('')}
+          ${D.prepaid ? `<tr><td colspan="4" class="muted">결제한 15회 중 ${Math.min(D.prepaid, D.size)}회 남음 — 다 쓰면 다음 15회 청구</td></tr>` : ''}
+        </tbody></table></div></div>`; }).join('') : '<p class="muted">Daily 학생이 없습니다. 학생·원비 설정에서 결제 방식을 &quot;출석 정산(Daily)&quot;으로 바꾸세요.</p>'}
   </div>`;
 }
-function dailySettle(name, d) { const s = db.students[name]; s.dailyPaid = Math.max(0, Math.min((s.dailyPaid || 0) + d, dailyInfo(s).blocks.length)); save(); render(); }
+function dailySettle(name, d) { const s = db.students[name]; s.dailyPaid = Math.max(0, Math.min((s.dailyPaid || 0) + d, dailyInfo(s).blocks.length + 1)); save(); render(); }
 
 function sessionCard() {
   const list = Object.values(db.students).filter(s => s.active && s.billing === 'session').sort(byOrder);
@@ -719,7 +726,7 @@ const md = iso => iso.slice(5).replace('-', '/').replace(/^0/, '').replace('/0',
 function payItemText(s, P) {
   const st = db.settings, c = P.cycle;
   let period;
-  if (s.billing === 'attend') { const a = attendedP(s); period = a.length ? `${md(a[0])}~${md(a[a.length - 1])}` : ''; }
+  if (s.billing === 'attend') { const D = dailyInfo(s); period = D.pending.map(b => `${md(b[0])}~${b.length >= D.size ? md(b[b.length - 1]) : ` ${D.size}회`}`).join(', '); }
   else if (c) period = `${md(c.start)}~${md(c.end)}`;
   else { const [y, m] = P.month.split('-').map(Number); period = `${m}/1~${m}/${new Date(y, m, 0).getDate()}`; }
   const map = { '월': mNum(P.month), '차수': c ? `${c.no}차` : `${mNum(P.month)}월`, '횟수': countP(s, P), '기간': period, '반': s.cls || '', '학생': shortName(s.name) };
