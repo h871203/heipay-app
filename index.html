@@ -249,7 +249,7 @@ const isExtra = item => EXTRA_RE.test(item) && !TUITION_RE.test(item);
 let db, state;
 
 function blank() {
-  return { settings: { ...DEFAULT_SETTINGS }, payments: [], students: {}, aliases: {}, attendance: {}, extras: {}, cycles: [],
+  return { settings: { ...DEFAULT_SETTINGS }, payments: [], students: {}, aliases: {}, attendance: {}, extras: {}, adjust: {}, cycles: [],
     templates: DEFAULT_TEMPLATES.map(t => ({ ...t })), expenses: [], recurring: [
       { id: uid(), cat: '임대료', desc: '월세', amount: 0 },
       { id: uid(), cat: '관리비·공과금', desc: '관리비/전기/인터넷', amount: 0 },
@@ -331,7 +331,25 @@ const extraP = s => (s.extra || 0) * (s.billing === 'attend' ? dailyInfo(s).pend
 // 정액 + 추가 수업(예: 화요일 1시간 추가 1회 25,000원) — 그 기간 안의 해당 요일 수만큼
 const addonCount = (s, P) => !s.addon ? 0 : P.isCycle ? cycleSessions({ days: s.addon.days }, P.cycle) : countDays(P.month, s.addon.days);
 const addonFee = (s, P) => s.addon ? s.addon.unit * addonCount(s, P) : 0;
-const baseFeeP = (s, P) => ['session', 'attend'].includes(s.billing) ? (s.unit || 25000) * countP(s, P) + extraP(s) : (s.fee || 0) + addonFee(s, P);
+// 결석(여행 등) 재청구 — '교습비 계산표(일일)' 방식:
+//   교습비(원비 - 캐피타운) ÷ 총 수업일수 × 실제 수업일수 (+ 캐피타운)
+const CAP_FEE = 18000;
+const adjOf = (name, P) => db.adjust?.[P.key]?.[name] || null;
+function scheduledDates(s, P) {
+  const out = [], from = P.isCycle ? P.cycle.start : P.month + '-01';
+  const to = P.isCycle ? P.cycle.end : isoOf(new Date(...P.month.split('-').map(Number), 0));
+  for (let d = from; d <= to; d = addDays(d, 1)) if ((s.days || []).includes(DOW[dOf(d).getDay()]) && !(P.isCycle && P.cycle.off.includes(d))) out.push(d);
+  return out;
+}
+function adjInfo(s, P) {
+  const a = adjOf(s.name, P); if (!a) return null;
+  const all = scheduledDates(s, P), missed = all.filter(d => d >= a.from && d <= a.to), n = all.length - missed.length;
+  const cap = a.cap === false ? 0 : CAP_FEE, tuition = (s.fee || 0) - CAP_FEE;
+  const part = Math.round(tuition / (all.length || 1) * n / 10) * 10;
+  return { ...a, all, missed, n, tuition, part, cap, fee: part + cap };
+}
+const baseFeeP = (s, P) => ['session', 'attend'].includes(s.billing) ? (s.unit || 25000) * countP(s, P) + extraP(s)
+  : adjOf(s.name, P) ? adjInfo(s, P).fee : (s.fee || 0) + addonFee(s, P);
 // 아이별 추가 수업: 차수(또는 월)마다 따로 넣는 금액
 const extrasOf = (name, P) => db.extras?.[P.key]?.[name] || [];
 const extrasSum = (name, P) => extrasOf(name, P).reduce((a, x) => a + x.n * x.unit, 0);
@@ -371,6 +389,8 @@ function applyRoster(d) {
     if (r.phone) s.phone = r.phone;
     s.enrolled = r.enrolled || s.enrolled || ''; if (r.memo) s.memo = r.memo;
     s.addon = r.addon ? { ...r.addon, days: [...r.addon.days] } : null;
+    (r.adjust || []).forEach(a => { const id = `${a.key}|${a.from}|${a.to}`; s.adjustSet ||= [];
+      if (!s.adjustSet.includes(id)) { ((d.adjust ||= {})[a.key] ||= {})[r.name] = { from: a.from, to: a.to, note: a.note || '결석', cap: a.cap !== false }; s.adjustSet.push(id); } });
     if (r.attStart && s.attStartSet !== `${r.attStart}|${r.dailyPaid}`) { s.attStart = r.attStart; s.dailyPaid = r.dailyPaid || 0; s.attStartSet = `${r.attStart}|${r.dailyPaid}`; }
     s.ledger ||= [];
   });
@@ -386,7 +406,7 @@ function countDays(month, days) {
   return n;
 }
 const sessionsFor = (s, month) => s.fixedCount || countDays(month, s.days || []);
-const feeFor = (s, month) => s.billing === 'attend' ? feeP(s, monthP(month)) : (s.billing === 'session' ? (s.unit || 25000) * sessionsFor(s, month) + (s.extra || 0) : (s.fee || 0) + addonFee(s, monthP(month))) + extrasSum(s.name, monthP(month));
+const feeFor = (s, month) => feeP(s, monthP(month));
 const remaining = s => (s.ledger || []).reduce((a, e) => a + (e.type === 'charge' ? e.n : -e.n), 0);
 const byOrder = (a, b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name);
 function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { toast('저장 실패: 브라우저 저장소를 쓸 수 없습니다'); } }
@@ -523,11 +543,14 @@ const tplFor = (tpl, s) => {
   return map[tpl.id] ? (db.templates.find(t => t.id === map[tpl.id]) || tpl) : tpl;
 };
 function amountText(s, P) {
-  const parts = [], ex = extrasOf(s.name, P);
-  if (s.addon && s.billing === 'monthly') parts.push(won(s.fee), `${s.addon.label} ${addonCount(s, P)}회 × ${won(s.addon.unit)}`);
+  const parts = [], ex = extrasOf(s.name, P), A = s.billing === 'monthly' && adjInfo(s, P);
+  if (A) { parts.push(`교습비 ${won(A.tuition)} ÷ ${A.all.length}회 × ${A.n}회 = ${won(A.part)}`); if (A.cap) parts.push(`캐피타운 ${won(A.cap)}`); }
+  else if (s.addon && s.billing === 'monthly') parts.push(won(s.fee), `${s.addon.label} ${addonCount(s, P)}회 × ${won(s.addon.unit)}`);
   else if (ex.length) parts.push(won(baseFeeP(s, P)));
   ex.forEach(x => parts.push(`${x.desc} ${x.n}회 × ${won(x.unit)}`));
-  return parts.length ? `${parts.join(' + ')} = ${won(feeP(s, P))}` : won(feeP(s, P));
+  const pre = A ? `${A.note || '결석'} ${md(A.from)}~${md(A.to)} ${A.missed.length}회 제외
+  ` : '';
+  return parts.length ? `${pre}${parts.join(' + ')} = ${won(feeP(s, P))}` : won(feeP(s, P));
 }
 function fillTemplate(body, s, P) {
   if (typeof P === 'string') P = monthP(P);
@@ -590,7 +613,7 @@ function viewDash() {
   ${S.unpaid.length ? `<div class="banner warn"><span>미납: ${S.unpaid.map(s => esc(shortName(s.name))).join(', ')}</span><button onclick="state.filter='unpaid';state.tpl='t3';go('msg')">미납 문자 만들기</button></div>` : ''}
   <div class="card"><h2>${mNum(m)}월 원비 납부 현황</h2>
     <p class="muted">${db.settings.cutoffDay}일 이후 결제는 다음 달 원비로 계산합니다. 현장 결제는 금액이 엑셀에 없어 학생 원비로 추정합니다.</p>
-    <div class="tbl"><table><thead><tr><th>학생</th><th>수업</th><th class="num">원비</th><th>납부</th><th>문자</th><th>추가 수업</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">재원생이 없습니다. 학생·원비 설정에서 추가하세요.</td></tr>'}</tbody></table></div>
+    <div class="tbl"><table><thead><tr><th>학생</th><th>수업</th><th class="num">원비</th><th>납부</th><th>문자</th><th>추가·결석</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">재원생이 없습니다. 학생·원비 설정에서 추가하세요.</td></tr>'}</tbody></table></div>
   </div>
   ${sessionCard()}`;
 }
@@ -605,7 +628,7 @@ function viewCycle() {
   studs.forEach(s => { expect += feeP(s, P); const pi = paidP(s.name, P); if (pi.paid) { paidCnt++; paidSum += pi.amount || 0; } else unpaid.push(s); });
   const sentCnt = studs.filter(s => sent[s.name]).length, t = todayISO();
   const status = t < c.start ? `시작 ${Math.round((dOf(c.start) - dOf(t)) / 864e5)}일 전` : t <= c.end ? '진행 중' : '종료';
-  const rows = studs.map(s => { const pi = paidP(s.name, P), n = countP(s, P); return `<tr>
+  const rows = studs.map(s => { const pi = paidP(s.name, P), adj = s.billing === 'monthly' && adjInfo(s, P), n = adj ? adj.n : countP(s, P); return `<tr>
       <td><strong>${esc(s.name)}</strong><div class="muted">${esc(s.cls)}</div></td>
       <td class="num">${n}회${s.billing === 'session' ? ' <span class="pill mut">회차제</span>' : s.billing === 'attend' ? ` <span class="pill mut">Daily 15회</span>` : ''}</td>
       <td class="num">${won(feeP(s, P))}${s.billing !== 'session' && (!s.fee || s.feeCheck) ? ' <span class="pill no">확인</span>' : ''}</td>
@@ -636,7 +659,7 @@ function viewCycle() {
   ${msgSection(P, 'ctpl', `${c.no}차 원비 문자 <span class="muted">· 마감 ${fmtD(c.payDue || c.start)}</span>`)}
   <div class="card" style="margin-top:14px"><h2>${c.no}차 납부 현황</h2>
     <p class="muted">결제일이 '차수 시작 2주 전 ~ 다음 차수 시작 2주 전' 사이면 이 차수 원비로 봅니다. 횟수는 학생 요일에서 휴강일을 뺀 수입니다.</p>
-    <div class="tbl"><table><thead><tr><th>학생</th><th class="num">횟수</th><th class="num">원비</th><th>납부</th><th>문자</th><th>추가 수업</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
+    <div class="tbl"><table><thead><tr><th>학생</th><th class="num">횟수</th><th class="num">원비</th><th>납부</th><th>문자</th><th>추가·결석</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
   <div class="card"><details><summary style="cursor:pointer"><strong>차수 일정 고치기</strong></summary>
     <p class="muted">휴강일은 '10/5, 10/9'처럼 날짜만 쓰면 횟수 계산에서 빠지고, '문자에 쓰는 휴강 안내'는 {휴강일} 칸에 그대로 들어갑니다.</p>
     <div class="tbl"><table><thead><tr><th>차수</th><th>시작</th><th>종료</th><th>휴강일(계산용)</th><th>문자에 쓰는 휴강 안내</th><th>월수금 횟수</th><th></th></tr></thead><tbody>
@@ -713,7 +736,7 @@ function msgSection(P, tplKey, title) {
   // 반별 모드: 정액 학생은 '같은 반 + 같은 원비'끼리 하나의 멘트(이름 없이), Daily·회차제는 아이별
   const byClass = db.settings.byClass !== false, units = [], groups = {};
   studs.forEach(s => {
-    if (!byClass || s.billing !== 'monthly' || extrasOf(s.name, P).length) return units.push({ s, members: [s] });
+    if (!byClass || s.billing !== 'monthly' || extrasOf(s.name, P).length || adjOf(s.name, P)) return units.push({ s, members: [s] });
     const k = `${s.cls}|${feeP(s, P)}`;
     if (!groups[k]) units.push(groups[k] = { s, members: [], group: true });
     groups[k].members.push(s);
@@ -731,6 +754,7 @@ function payItemText(s, P) {
   else { const [y, m] = P.month.split('-').map(Number); period = `${m}/1~${m}/${new Date(y, m, 0).getDate()}`; }
   const map = { '월': mNum(P.month), '차수': c ? `${c.no}차` : `${mNum(P.month)}월`, '횟수': countP(s, P), '기간': period, '반': s.cls || '', '학생': shortName(s.name) };
   if (s.addon && s.billing === 'monthly') map['횟수'] = `${countP(s, P)}회+${s.addon.days.join('')}요일 추가 ${addonCount(s, P)}`;
+  const A = s.billing === 'monthly' && adjInfo(s, P); if (A) map['기간'] = `${period}, ${A.n}회 수업`;
   const exN = extrasOf(s.name, P).reduce((a, x) => a + x.n, 0);
   if (exN) map['횟수'] = `${map['횟수']}회+추가 ${exN}`;
   return (s.billing === 'attend' ? st.payItemDaily : st.payItem).replace(/\{(.+?)\}/g, (m, k) => map[k] ?? m);
@@ -957,8 +981,25 @@ function extraCell(s, P) {
   const nm = esc(s.name);
   return extrasOf(s.name, P).map(x => `<div style="font-size:12px;white-space:nowrap">${esc(x.desc)} ${x.n}회 · ${won(x.n * x.unit)}
     <button class="sm" style="padding:0 6px" title="삭제" onclick="delExtra('${nm}','${P.key}','${x.id}')">✕</button></div>`).join('')
-    + `<button class="sm" onclick="addExtra('${nm}','${P.key}')">+ 추가</button>`;
+    + (A => A ? `<div style="font-size:12px;white-space:nowrap"><span class="pill no">재청구</span> ${esc(A.note)} ${md(A.from)}~${md(A.to)} ${A.missed.length}회 결석 → ${A.n}회 ${won(A.fee)}
+      <button class="sm" style="padding:0 6px" title="삭제" onclick="delAdjust('${nm}','${P.key}')">✕</button></div>` : '')(s.billing === 'monthly' && adjInfo(s, P))
+    + `<button class="sm" onclick="addExtra('${nm}','${P.key}')">+ 추가</button>`
+    + (s.billing === 'monthly' ? ` <button class="sm" onclick="addAdjust('${nm}','${P.key}')">결석 조정</button>` : '');
 }
+function parseMD(v, P) { const m = String(v).match(/(\d{1,2})\s*[\/.-]\s*(\d{1,2})/); if (!m) return null;
+  const y0 = Number((P.isCycle ? P.cycle.start : P.month).slice(0, 4)), m0 = Number((P.isCycle ? P.cycle.start : P.month).slice(5, 7));
+  return `${Number(m[1]) < m0 - 6 ? y0 + 1 : y0}-${pad(m[1])}-${pad(m[2])}`; }
+function addAdjust(name, key) {
+  const P = key.startsWith('c') ? cycleP(Number(key.slice(1))) : monthP(key), s = db.students[name];
+  const from = parseMD(prompt(`${name} ${P.label} 결석 시작일 (예: 10/16)`, ''), P); if (!from) return;
+  const to = parseMD(prompt('결석 마지막 날 (예: 10/28)', ''), P); if (!to) return;
+  const note = prompt('사유', '여행 결석'); if (note == null) return;
+  const cap = confirm(`캐피타운 ${won(CAP_FEE)}은 그대로 받을까요?
+(확인 = 받기, 취소 = 빼기)`);
+  ((db.adjust ||= {})[key] ||= {})[name] = { from, to: to < from ? from : to, note: note.trim() || '결석', cap };
+  save(); render(); const A = adjInfo(s, P); toast(`${name} ${A.missed.length}회 결석 → ${A.n}회 ${won(A.fee)}로 재청구`);
+}
+function delAdjust(name, key) { delete db.adjust[key][name]; save(); render(); }
 function addExtra(name, key) {
   const desc = prompt(`${name} 추가 내용 (예: 추가 수업, 보강, 특강)`, '추가 수업'); if (desc == null) return;
   const n = toNum(prompt('횟수', '1')); if (!n) return;
