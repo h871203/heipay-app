@@ -623,7 +623,7 @@ function viewDash() {
     <div class="stat"><div class="l">${mNum(m)}월 순수익 (돈관리)</div><div class="v">${won(S.income - S.expense)}</div><div class="s">수입 ${won(S.income)} · 지출 ${won(S.expense)}</div></div>
   </div>
   ${S.unpaid.length ? `<div class="banner warn"><span>미납: ${S.unpaid.map(s => esc(shortName(s.name))).join(', ')}</span><button onclick="state.filter='unpaid';state.tpl='t3';go('msg')">미납 문자 만들기</button></div>` : ''}
-  <div class="card"><h2>${mNum(m)}월 원비 납부 현황</h2>
+  <div class="card"><div class="row" style="margin-bottom:6px"><h2 style="margin:0">${mNum(m)}월 원비 납부 현황</h2><button class="sm pri" onclick="exportStatus('${m}')">엑셀로 저장</button></div>
     <p class="muted">${db.settings.cutoffDay}일 이후 결제는 다음 달 원비로 계산합니다. 현장 결제는 금액이 엑셀에 없어 학생 원비로 추정합니다.</p>
     <div class="tbl"><table><thead><tr><th>학생</th><th>수업</th><th class="num">원비</th><th>납부</th><th>문자</th><th>추가·결석</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">재원생이 없습니다. 학생·원비 설정에서 추가하세요.</td></tr>'}</tbody></table></div>
   </div>
@@ -669,7 +669,7 @@ function viewCycle() {
   </div>
   ${dailyCard(P)}
   ${msgSection(P, 'ctpl', `${c.no}차 원비 문자 <span class="muted">· 마감 ${fmtD(c.payDue || c.start)}</span>`)}
-  <div class="card" style="margin-top:14px"><h2>${c.no}차 납부 현황</h2>
+  <div class="card" style="margin-top:14px"><div class="row" style="margin-bottom:6px"><h2 style="margin:0">${c.no}차 납부 현황</h2><button class="sm pri" onclick="exportStatus('${P.key}')">엑셀로 저장</button></div>
     <p class="muted">결제일이 '차수 시작 2주 전 ~ 다음 차수 시작 2주 전' 사이면 이 차수 원비로 봅니다. 횟수는 학생 요일에서 휴강일을 뺀 수입니다.</p>
     <div class="tbl"><table><thead><tr><th>학생</th><th class="num">횟수</th><th class="num">원비</th><th>납부</th><th>문자</th><th>추가·결석</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
   <div class="card"><details><summary style="cursor:pointer"><strong>차수 일정 고치기</strong></summary>
@@ -971,11 +971,32 @@ function editTpl(k, v) { const t = db.templates.find(t => t.id === state[curTplK
 function insertVar(v) { const ta = document.getElementById('tplBody'); const s = ta.selectionStart, e = ta.selectionEnd; ta.value = ta.value.slice(0, s) + v + ta.value.slice(e); ta.focus(); ta.setSelectionRange(s + v.length, s + v.length); editTpl('body', ta.value); }
 function newTemplate() { const t = { id: uid(), name: '새 멘트', body: '[{학원}] 안녕하세요, {학생} 학부모님.\n\n{서명}' }; db.templates.push(t); state[curTplKey] = t.id; save(); render(); document.getElementById('tplBody').closest('details').open = true; }
 function delTemplate() { if (!confirm('이 멘트를 삭제할까요?')) return; db.templates = db.templates.filter(t => t.id !== state[curTplKey]); state[curTplKey] = db.templates[0].id; save(); render(); }
-function manualPay(name, key = state.month) {
-  const P = key.startsWith('c') ? cycleP(Number(key.slice(1))) : monthP(key);
-  const s = db.students[name]; const a = prompt(`${name} ${P.label} 납부 금액 (현금·계좌이체 등 엑셀에 없는 결제)`, feeP(s, P) || ''); if (a == null) return;
-  const method = prompt('수납 방법', '계좌이체') || '수동';
-  (db.manualPaid[key] ||= {})[name] = { amount: toNum(a) || 0, method, date: today() }; save(); render();
+// 화면 안 입력 창 (브라우저 팝업 prompt가 막힌 곳에서도 동작)
+function askForm(title, fields) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px';
+    wrap.innerHTML = `<form class="card" style="width:100%;max-width:380px;margin:0"><h2>${esc(title)}</h2>
+      ${fields.map(f => `<label class="inl" style="margin-bottom:10px">${esc(f.label)}${f.options
+        ? `<select name="${f.key}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(f.value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
+        : `<input name="${f.key}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" ${f.type === 'number' ? 'inputmode="numeric"' : ''}>`}</label>`).join('')}
+      <div class="row" style="justify-content:flex-end"><button type="button" data-x>취소</button><button class="pri" type="submit">확인</button></div></form>`;
+    const done = v => { wrap.remove(); resolve(v); };
+    wrap.querySelector('[data-x]').onclick = () => done(null);
+    wrap.onclick = e => { if (e.target === wrap) done(null); };
+    wrap.querySelector('form').onsubmit = e => { e.preventDefault(); done(Object.fromEntries(new FormData(e.target))); };
+    document.body.append(wrap); wrap.querySelector('input,select')?.focus();
+  });
+}
+async function manualPay(name, key = state.month) {
+  const P = key.startsWith('c') ? cycleP(Number(key.slice(1))) : monthP(key), s = db.students[name];
+  const v = await askForm(`${name} ${P.label} 납부 처리`, [
+    { key: 'amount', label: '받은 금액', type: 'number', value: feeP(s, P) || '' },
+    { key: 'method', label: '수납 방법', value: '계좌이체', options: [['계좌이체', '계좌이체'], ['현장수납', '현장수납(카드)'], ['현금', '현금'], ['결제선생', '결제 링크']] },
+    { key: 'date', label: '받은 날', type: 'date', value: todayISO() }]);
+  if (!v) return;
+  (db.manualPaid[key] ||= {})[name] = { amount: toNum(v.amount) || 0, method: v.method, date: (v.date || todayISO()).slice(5).replace('-', '/') }; save(); render();
+  toast(`${name} 납부 처리했어요`);
 }
 const today = () => { const t = new Date(); return `${t.getMonth() + 1}/${t.getDate()}`; };
 function useSession(name) { db.students[name].ledger.push({ type: 'use', n: 1, date: today() }); save(); render(); toast(`${name} 1회 차감`); }
@@ -1001,21 +1022,24 @@ function extraCell(s, P) {
 function parseMD(v, P) { const m = String(v).match(/(\d{1,2})\s*[\/.-]\s*(\d{1,2})/); if (!m) return null;
   const y0 = Number((P.isCycle ? P.cycle.start : P.month).slice(0, 4)), m0 = Number((P.isCycle ? P.cycle.start : P.month).slice(5, 7));
   return `${Number(m[1]) < m0 - 6 ? y0 + 1 : y0}-${pad(m[1])}-${pad(m[2])}`; }
-function addAdjust(name, key) {
+async function addAdjust(name, key) {
   const P = key.startsWith('c') ? cycleP(Number(key.slice(1))) : monthP(key), s = db.students[name];
-  const from = parseMD(prompt(`${name} ${P.label} 결석 시작일 (예: 10/16)`, ''), P); if (!from) return;
-  const to = parseMD(prompt('결석 마지막 날 (예: 10/28)', ''), P); if (!to) return;
-  const note = prompt('사유', '여행 결석'); if (note == null) return;
-  const cap = confirm(`캐피타운 ${won(CAP_FEE)}은 그대로 받을까요?
-(확인 = 받기, 취소 = 빼기)`);
-  ((db.adjust ||= {})[key] ||= {})[name] = { from, to: to < from ? from : to, note: note.trim() || '결석', cap };
+  const start = P.isCycle ? P.cycle.start : P.month + '-01';
+  const v = await askForm(`${name} ${P.label} 결석 조정 (재청구)`, [
+    { key: 'from', label: '결석 시작일', type: 'date', value: start }, { key: 'to', label: '결석 마지막 날', type: 'date', value: start },
+    { key: 'note', label: '사유', value: '여행 결석' },
+    { key: 'cap', label: `캐피타운 ${won(CAP_FEE)}`, value: '1', options: [['1', '그대로 받기'], ['0', '빼기']] }]);
+  if (!v || !v.from) return;
+  const from = v.from, to = v.to && v.to >= from ? v.to : from;
+  ((db.adjust ||= {})[key] ||= {})[name] = { from, to, note: (v.note || '').trim() || '결석', cap: v.cap === '1' };
   save(); render(); const A = adjInfo(s, P); toast(`${name} ${A.missed.length}회 결석 → ${A.n}회 ${won(A.fee)}로 재청구`);
 }
 function delAdjust(name, key) { delete db.adjust[key][name]; save(); render(); }
-function addExtra(name, key) {
-  const desc = prompt(`${name} 추가 내용 (예: 추가 수업, 보강, 특강)`, '추가 수업'); if (desc == null) return;
-  const n = toNum(prompt('횟수', '1')); if (!n) return;
-  const unit = toNum(prompt('1회 금액', '25000')); if (unit == null) return;
+async function addExtra(name, key) {
+  const v = await askForm(`${name} 추가 수업`, [{ key: 'desc', label: '내용 (예: 추가 수업, 보강, 특강)', value: '추가 수업' },
+    { key: 'n', label: '횟수', type: 'number', value: 1 }, { key: 'unit', label: '1회 금액', type: 'number', value: 25000 }]);
+  if (!v) return;
+  const desc = v.desc, n = toNum(v.n), unit = toNum(v.unit); if (!n || unit == null) return;
   ((db.extras ||= {})[key] ||= {})[name] ||= [];
   db.extras[key][name].push({ id: uid(), desc: desc.trim() || '추가 수업', n, unit }); save(); render();
   toast(`${name} ${desc} ${n}회 · ${won(n * unit)} 추가`);
